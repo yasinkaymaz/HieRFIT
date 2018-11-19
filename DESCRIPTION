@@ -1,0 +1,11 @@
+Package: cellRtools
+Type: Package
+Title: This package provides a collection of functions to analyze single cell RNAseq datasets.
+Version: 0.1.0
+Author: Yasin Kaymaz, Bioinformatics Scientist, Harvard University
+Maintainer: The package maintainer <yasinkaymaz@g.harvard.edu>
+Description: Cell type assignment is one of the cumbersome challenges when analyzing scRNAseq datasets. This package provides a function to predict cell types based on transcriptional profiles using supervised machine learning techniques.
+    This package also provides a function to perform Gene set enrichment analysis within/between cell clusters using GSEA software inirially developed by Broad Inst.
+License: Licenced under GNU General Public License v3.0.
+Encoding: UTF-8
+LazyData: true
