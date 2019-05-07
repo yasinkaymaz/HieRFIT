@@ -36,6 +36,13 @@ multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
   }
 }
 
+#' This function uses 'ape' package.
+#' @param tree a tree object in phylo format.
+#' @examples PlotTopo(RandTreeSim(LN = sample(5:20, 1)))
+PlotTopo <- function(tree){
+  ape::plot.phylo(x = tree, direction = "downwards", show.node.label = TRUE,)
+}
+
 PlotPredictions <- function(SeuratObject, model, save.pdf=T, outputFilename="plotpredictions") {
   #Evaluate model prediction accuracy:
   conf.mat <- model$confusion %>% as.data.frame() %>% select(-class.error)
