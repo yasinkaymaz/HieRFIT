@@ -1,8 +1,22 @@
-#  ToDo:
-# 1. prefilter genes to perform PCA (based on highly variable genes).
-# 2. Merge some nodes into one to generate a non-redundant tree. Binary to multiple-nodes...
-# 3. DONE. Implement paralel processing. library(doParallel) rCluster <- makePSOCKcluster(6) registerDoParallel(rCluster)
-# 4. BANNER for repo; A tree topology and A neuronal cell projecting datasets from axons to snaps where the query datasets are. --> use as a banner.
+#' Done:
+#' 1. Selecting only meaningful PCs which separate at least one class significantly for feature selection
+#' 2. Implemented parallel processing with multi-threading
+#' 3. Re-wrote funtions as an R package.
+#' 4. A single execution takes Ref and Query to do all.
+#' 5. User needs to provide a Reference data with class labels, a Query data,
+#'    and optionally a tree for defining the relationship between the class labels.
+#'    It can run a flat classifier with RF or SVM. or Hierarchical Random Forest.
+#' #  ToDo:
+#' 1. prefilter genes to perform PCA (based on highly variable genes).
+#' 2. Merge some nodes into one to generate a non-redundant tree. Binary to multiple-nodes...
+#' 3. DONE. Implement paralel processing. library(doParallel) rCluster <- makePSOCKcluster(6) registerDoParallel(rCluster)
+#' 4. BANNER for repo; A tree topology and A neuronal cell projecting datasets from axons to snaps where the query datasets are. --> use as a banner.
+#' 5. Don't use more than 1000 samples per class. optional Predictor number.
+#'
+
+
+
+
 
 # General Functions
 #  2. An upper-level/wrapper function for cell type prediction given a model and a test data.
@@ -36,6 +50,22 @@
 #    First asks DataReshaper(TestData, model$Predictors) to generate Tdata out of TestData.
 #    Queries the prediction output from the model.
 #    Asks UncerCal (UncertaintyCalculator) to return a score for each prediction.
+
+check_object <- function(object) {
+  errors <- character()
+  length_age <- length(object@age)
+  if (length_age != 1) {
+    msg <- paste("Age is length ", length_age, ".  Should be 1", sep = "")
+    errors <- c(errors, msg)
+  }
+  length_name <- length(object@name)
+  if (length_name != 1) {
+    msg <- paste("Name is length ", length_name, ".  Should be 1", sep = "")
+    errors <- c(errors, msg)
+  }
+  if (length(errors) == 0) TRUE else errors
+}
+
 
 
 CellTyperTrainer2 <- function(ExpData, ClassLabels, model.method="rf", run.name, PCs, cv.k=5) {

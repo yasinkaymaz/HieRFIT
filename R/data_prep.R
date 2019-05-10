@@ -8,100 +8,68 @@ ParApp <- function() {
   prefix <- ""
 }
 
+#' The CellRpred Class
+#' @slot Prior
+#' @slot Predictors
+#' @slot Projection
+#' @slot mod.name
+CellRpred <- setClass(Class = "CellRpred",
+                      slots = c(Prior = "character",
+                               ClassProbilities = "data.frame",
+                               Projection = "character",
+                               mod.name = "character"))
+
+
 #' The main function to project reference data on query in order to identify class labels.
 #' @param Ref Reference data from which class labels will be projected on Query data.
 #' @param Query Query data whose components will be labeled with reference data.
 #' @param method The model training method, "rf" for random forest, "svmLinear" for support vector machine, "hrf" for hierarchical random forest. Default is "hrf"
+#' @param ClassLabels A list of class labels for cells/samples in the ExpData matrix (Ref). Same length as colnames(Ref).
+#' @param TreeFile An input file to create a hierarchical tree for relationship between class labels. Default is null but required if method 'hrf' is chosen.
+#' @param model optional input if model exist already. Default is null and generated from scratch. Input can be an caret model object or a .Rdata file.
 #' @keywords
 #' @export
-#' @examples
-CellProjector <- function(Ref, Query, method="hrf"){
+#' @examples cpo <- CellProjector(Ref = as.matrix(pbmc@data), ClassLabels = pbmc@meta.data$ClusterNames_0.6, Query = as.matrix(pbmc1@data))
+CellProjector <- function(Ref, ClassLabels, Query, TreeFile=NULL, model=NULL, method="hrf"){
+  #Tree file. Required if method 'hrf' is chosen.
+  tree <- CreateTree(TreeFile)
   #Determine the input (Ref/Query) properties.
   #Create predictive model structure. No need to create if exists.
-  Modeller(ExpData = Ref)
-  # Prepare query dataset using P_dicts from the model or Refdata
-  QueData <- DataReshaper(ExpData = Query, Predictors = P_dicts)
-
-  return(outcome)
-}
-
-CellTyper <- function(SeuratObject, testExpSet, model, priorLabels, outputFilename="plotpredictions"){
-
-  if(!missing(SeuratObject)){
-    testExpSet <- t(as.matrix(SeuratObject@data))
+  #Skip this step if already ran.
+  if (!is.null(model)) {
+    if(file.exists(model)){
+      print("An existing file for a model is found in the directory! Using it...")
+      model <- get(load(model))
+    }else{
+      model <- model
+    }
   }else{
-    print("Expression matrix is provided...")
-    testExpSet <- t(as.matrix(testExpSet))
-  }#Closes missing(SeuratObj)
-  colnames(testExpSet) <- make.names(colnames(testExpSet))
-  #Prepare Test Expression set
-  testsub <- testExpSet[,which(colnames(testExpSet) %in% attributes(model$terms)$term.labels)]
-  missingGenes <- attributes(model$terms)$term.labels[which(!attributes(model$terms)$term.labels %in% colnames(testExpSet))]
-  print(missingGenes)
-  missingGenes.df <- data.frame(matrix(0, ncol = length(missingGenes), nrow = length(rownames(testExpSet))))
-  colnames(missingGenes.df) <- missingGenes
-  TestData <- cbind(testsub, missingGenes.df)
-  TestData <- TestData[,attributes(model$terms)$term.labels]
-  cat("Number of Features (genes) to be considered is", length(colnames(testsub)), '\n', "Number of missing Features set to zero is", length(missingGenes), '\n', sep = ' ')
-
-  rm(testsub, missingGenes, missingGenes.df)
-  gc()
-  #Predict
- # library(entropy)
-  testPred <- as.data.frame(predict(model, TestData, type = "prob"))
-  class_n <- length(model$classes)
-  testPred$Diff <- apply(testPred, 1, function(x) max(x)-sort(x,partial=length(x)-1)[length(x)-1])
-  testPred$KLe <- apply(testPred[,which(!names(testPred) %in% c("Diff"))], 1, function(x) KL.empirical(y1 = as.numeric(x), y2 = rep(1/class_n, class_n)) )
-  testPred$BestVotesPercent <- apply(testPred[,which(!names(testPred) %in% c("Diff","KLe"))],1, function(x) max(x)  )
-  testPred$Prediction <- predict(model, TestData, type="raw")
-
-  #Flag cell type prediction if Kullback-Leibler divergence value is higher than 0.5 OR the difference between the highest and the second highest percent vote (Diff) is higher than two time of random vote rate (2/class_n)
-  testPred <- testPred %>% as.tibble() %>% mutate(Intermediate = Prediction ) %>% as.data.frame()
-  testPred <- testPred %>% as.tibble() %>% mutate(Prediction = if_else( (KLe <= 0.25) | (Diff <= 2/class_n), "Undetermined", as.character(Prediction) )) %>% as.data.frame()
-  testPred <- testPred %>% as.tibble() %>% mutate(PredictionStatus = if_else( (KLe <= 0.25) | (Diff <= 2/class_n), "Undetermined", "Detected")) %>% as.data.frame()
-  #testPred <- testPred %>% as.tibble() %>% mutate(Prediction = ifelse( (KLe <= 0.5) | (Diff <= 2/class_n), "Unclassified", as.character(Prediction) )) %>% as.data.frame()
-
-  if(missing(priorLabels)){
-    print("Prior class labels are not provided!")
-
-  }else{
-    #Provided prior class labels (priorLabels) has to be a dataframe with same rownames as input testExpSet with one column storing labels.
-    priorLabels <- as.data.frame(priorLabels)
-    colnames(priorLabels) <- c("Prior")
-    testPred <- cbind(testPred, priorLabels)
-
-    #Plot the crosscheck here:
-    #Crosscheck Predictions
-  #  library(tidyverse)
-  #  library(alluvial)
-  #  library(ggalluvial)
-    crx <- testPred %>% group_by(Prior, Intermediate, Prediction) %>% tally() %>% as.data.frame()
-
-    p5 <- ggplot(crx,aes(y = n, axis1 = Prior, axis2 = Intermediate, axis3 = Prediction )) +
-      geom_alluvium(aes(fill = Prediction), width = 1/12) +
-      geom_stratum(width = 1/12, fill = "black", color = "grey") +
-      geom_label(stat = "stratum", label.strata = TRUE) +
-      scale_x_discrete(limits = c("Prior", "Int-Prediction", "Final-Prediction"), expand = c(.05, .05)) +
-      ggtitle("Predictions Cross-Check")
-
-    cowplot::save_plot(filename = paste(outputFilename,".prediction-crosscheck.pdf",sep=""),plot = p5, base_height = 16, base_width = 20)
-
+    print("Training model... This may take some time... Please, be patient!")
+    model <- Modeller(ExpData = Ref, ClassLabels = ClassLabels, mod.meth = method, tree = tree)
   }
 
-  if(!missing(SeuratObject)){
+  if(method == "hrf"){
+    nodes_P_all <- CTTraverser(Query = Query, tree = tree, hiemods = model)
+    P_path_prod <- ClassProbCalculator(tree = tree, nodes_P_all = nodes_P_all)
+    #Run uncertainty function
+    #exclude first column with query ids.
+    Prediction <- colnames(P_path_prod)[apply(P_path_prod, 1, which.max)]
 
-    SeuratObject@meta.data <- SeuratObject@meta.data[,which(!colnames(SeuratObject@meta.data) %in% colnames(testPred))]
-    SeuratObject@meta.data <- cbind(SeuratObject@meta.data, testPred)
-
-    PlotPredictions(SeuratObject = SeuratObject, model = model, outputFilename = outputFilename)
-
-    return(SeuratObject)
   }else{
-    print("Prediction output is being exported ...")
-    rownames(testPred) <- rownames(testExpSet)
-    return(testPred)
-  }#Closes missing(SeuratObj)
-}#closes the function
+    P_path_prod <- Predictor(model = model, Query = Query)
+    #Run uncertainty function
+    Prediction <- colnames(P_path_prod)[apply(P_path_prod, 1, which.max)]
+  }
+
+  object <- new(Class = 'CellRpred',
+                ClassProbilities = P_path_prod,
+                Projection = Prediction,
+                mod.name = method
+                )
+
+  return(object)
+}
+
 
 #' An internal function to collect model training parameters and direct them to model creation.
 #' @param ExpData a Normalized expression data matrix, genes in rows and samples in columns.
@@ -222,7 +190,7 @@ SvmWrap <- function(ExpData=ExpData, ClassLabels=ClassLabels, prefix, mod.meth, 
 #' @keywords
 #' @export
 #' @examples
-HieRandForest <- function(ExpData=ExpData, ClassLabels=ClassLabels, tree, thread){
+HieRandForest <- function(ExpData=ExpData, ClassLabels=ClassLabels, tree, thread=3){
   library(doParallel)
   node.list <- DigestTree(tree = tree)
   hiemods <- vector("list", length = max(node.list))
@@ -398,10 +366,10 @@ DataReshaper <- function(ExpData, Predictors, ClassLabels, alpa=0.1, ...) {
 CTTraverser <- function(Query, tree, hiemods, thread=NULL){
   library(doParallel)
   node.list <- DigestTree(tree = tree)
+  #Create a table for storing node probabilities.
+  ProbTab <- data.frame(Queries = colnames(Query))
 
   if(is.null(thread)){
-    #Create a table for storing node probabilities.
-    ProbTab <- data.frame(Queries = colnames(Query))
     #Build a local classifier for each node in the tree. Binary or multi-class mixed.
     for(i in node.list){
       nodeProb <- Predictor(model = hiemods[[as.character(i)]],
@@ -416,13 +384,14 @@ CTTraverser <- function(Query, tree, hiemods, thread=NULL){
     registerDoParallel(cl)
     print(paste("registered cores is", getDoParWorkers(), sep = " "))
 
-    ProbTab <- foreach(i=node.list, .inorder = TRUE, .combine=data.frame) %dopar% {
+    nodeProb <- foreach(i=node.list, .inorder = TRUE, .combine=cbind) %dopar% {
       Predictor(model = hiemods[[as.character(i)]],
                 format = "prob",
                 Query = Query,
                 node = i)
     }
     stopCluster(cl)
+    ProbTab <- cbind(ProbTab, nodeProb)
   }
 
   return(ProbTab)
@@ -436,14 +405,19 @@ Predictor <- function(model, Query, format="prob", node=NULL){
   P_dicts <- colnames(model$trainingData)
   P_dicts <- P_dicts[P_dicts != ".outcome"]
   QueData <- DataReshaper(ExpData = Query, Predictors = P_dicts)
-  if(format == "prob"){
-    c_f <- length(model$levels) #correction factor; class size
+
+  if(is.null(node)){
     QuePred <- as.data.frame(predict(model, QueData, type = "prob"))
-    QuePred <- QuePred*c_f
-    colnames(QuePred) <- paste(node, colnames(QuePred), sep = "")
-  } else {
-    QuePred <- as.data.frame(predict(model, QueData, type = "raw"))
-    colnames(QuePred) <- as.character(node)
+  } else{
+    if(format == "prob"){
+      c_f <- length(model$levels) #correction factor; class size
+      QuePred <- as.data.frame(predict(model, QueData, type = "prob"))
+      QuePred <- QuePred*c_f
+      colnames(QuePred) <- paste(node, colnames(QuePred), sep = "")
+    } else {
+      QuePred <- as.data.frame(predict(model, QueData, type = "raw"))
+      colnames(QuePred) <- as.character(node)
+    }
   }
   return(QuePred)
 }
@@ -469,13 +443,15 @@ RandTreeSim <- function(LN=8, furcation="binary"){
   return(tree)
 }
 
-CreateTree <- function(){
+CreateTree <- function(x){
   #Create a tree:
   final.text <- "((CD8.T.cells, CD4.T.cells), (CD14..Monocytes, FCGR3A..Monocytes), Dendritic.cells, NK.cells, B.cells, Megakaryocytes);"
-  pbmc3k_tree <- ape::read.tree(text=final.text)
+  tree <- ape::read.tree(text=final.text)
   L <- list(T_cells = "T.cells", Monocytes = "Monocytes", Pbmc = c("T.cells", "Monocytes"))
-  pbmc3k_tree <- ape::makeNodeLabel(pbmc3k_tree, "u", nodeList = L)
-}
+  tree <- ape::makeNodeLabel(tree, "u", nodeList = L)
+
+  return(tree)
+} # Fix dummy input
 
 CheckTreeIntegrity <- function(){}
 
@@ -552,77 +528,36 @@ NodeTrainer <- function(Tdata, tree, node){
   return(node.mod)
 }
 
-GetAncestorsPath <- function(tree, leafNode){
-  ancestors <- c()
-  leafside <- c()
-  ni = leafNode
-  parent <- tree$edge[which(x = tree$edge[, 2] == leafNode), ][1]
+GetAncestPath <- function(tree, class){
+  path <- c()
+  labs_l <- c(tree$tip.label, tree$node.label)
+  Node <- match(class, labs_l)
+  parent <- tree$edge[which(x = tree$edge[, 2] == Node), ][1]
   while(!is.na(parent)){
-    if(tree$edge[which(x = tree$edge[, 1] == parent), ][, 2][1] == ni){
-      leafside <- c(leafside, "L")
-    }else{
-      leafside <- c(leafside, "R")
-    }
-    ancestors <- c(ancestors, parent)
-    ni <- parent
+    path <- c(path, paste(parent, class, sep = ""))
+    class <- labs_l[parent]
     parent <- tree$edge[which(x = tree$edge[, 2] == parent), ][1]
   }
-  path <- paste(ancestors, leafside, sep = "")
-  map <- list(leafNode, path)
-  return(map)
+  return(path)
 }
 
-
-ClassProbCalculator <- function(tree, Htable){
+#' A function to calculate class scores for all internal and tip node classes.
+#' @param tree
+#' @param nodes_P_all a table output from CTTraverser() which contains all class probabilities from every node.
+#' @return P_path_prod a table for products of ancestor node scores.
+ClassProbCalculator <- function(tree, nodes_P_all){
   #CTip_table <- data.frame(matrix(ncol = 0, nrow = length(rownames(Htable))))
-  CTip_table <- data.frame(cells = rownames(Htable))
-  for(nt in tree$tip.label){
-    map <- GetAncestorsPath(tree = tree, leafNode = nt)
+  P_path_prod <- data.frame(row.names = rownames(nodes_P_all))
+  clabs <- c(tree$tip.label, tree$node.label)[tree$edge[, 2]]
 
-    nt_prob <- data.frame(matrixStats::rowProds(as.matrix(Htable[,map[[2]]])))
-    colnames(nt_prob) <- paste(nt, "classProb",sep = "_")
-    print(head(nt_prob))
-    CTip_table <- cbind(CTip_table, nt_prob)
+  for(cl in clabs){
+    map <- GetAncestPath(tree = tree, class = cl)
+    nt_prob <- data.frame(matrixStats::rowProds(as.matrix(nodes_P_all[, map])))
+    colnames(nt_prob) <- cl
+    P_path_prod <- cbind(P_path_prod, nt_prob)
   }
-  print(head(CTip_table))
-  return(CTip_table)
+  return(P_path_prod)
 }
-
-HTyper2 <- function(SeuratObject, tree, testExpSet, models, priorLabels, outputFilename="plotpredictions"){
-
-  #models is a list of of rf models
-
-
-  if(!missing(SeuratObject)){
-    testExpSet <- t(as.matrix(SeuratObject@data))
-  }else{
-    print("Expression matrix is provided...")
-    testExpSet <- t(as.matrix(testExpSet))
-  }#Closes missing(SeuratObj)
-
-  colnames(testExpSet) <- make.names(colnames(testExpSet))
-
-  CTTtables <- ClassifierTreeTraverser(testExpSet = testExpSet,
-                                       tree = tree,
-                                       CLoc.list = CLoc.list)
-
-  Ctable <- ClassProbCalculator(tree = tree,
-                                Htable = CTTtables[[1]] )
-  Ctable$HRFPrediction <- str_remove(colnames(Ctable)[apply(Ctable, 1, which.max)], "_classProb")
-
-  if(!missing(SeuratObject)){
-    #update predictions in the meta.data slot
-    SeuratObject@meta.data <- SeuratObject@meta.data[, which(!colnames(SeuratObject@meta.data) %in% colnames(cbind(Ctable, CTTtables[[2]])))]
-    SeuratObject@meta.data <- cbind(SeuratObject@meta.data, Ctable, CTTtables[[2]])
-
-    return(SeuratObject)
-
-  }else{
-    print("Prediction output is being exported ...")
-    rownames(testPred) <- rownames(testExpSet)
-    return(testPred)
-  }#Closes missing(SeuratObj)
-}#closes the function
 
 #' A wrapper function for quick data processing with Seurat functions
 #' This function allows to determine highly variable genes and scale their expression,
@@ -780,4 +715,82 @@ SeuratCCAmerger <- function(listofObjects) {
   save(integrated, file="integrated.Aligned.seurat.Robj")
   return(integrated)
 }
+
+CellTyper <- function(SeuratObject, testExpSet, model, priorLabels, outputFilename="plotpredictions"){
+
+  if(!missing(SeuratObject)){
+    testExpSet <- t(as.matrix(SeuratObject@data))
+  }else{
+    print("Expression matrix is provided...")
+    testExpSet <- t(as.matrix(testExpSet))
+  }#Closes missing(SeuratObj)
+  colnames(testExpSet) <- make.names(colnames(testExpSet))
+  #Prepare Test Expression set
+  testsub <- testExpSet[,which(colnames(testExpSet) %in% attributes(model$terms)$term.labels)]
+  missingGenes <- attributes(model$terms)$term.labels[which(!attributes(model$terms)$term.labels %in% colnames(testExpSet))]
+  print(missingGenes)
+  missingGenes.df <- data.frame(matrix(0, ncol = length(missingGenes), nrow = length(rownames(testExpSet))))
+  colnames(missingGenes.df) <- missingGenes
+  TestData <- cbind(testsub, missingGenes.df)
+  TestData <- TestData[,attributes(model$terms)$term.labels]
+  cat("Number of Features (genes) to be considered is", length(colnames(testsub)), '\n', "Number of missing Features set to zero is", length(missingGenes), '\n', sep = ' ')
+
+  rm(testsub, missingGenes, missingGenes.df)
+  gc()
+  #Predict
+  # library(entropy)
+  testPred <- as.data.frame(predict(model, TestData, type = "prob"))
+  class_n <- length(model$classes)
+  testPred$Diff <- apply(testPred, 1, function(x) max(x)-sort(x,partial=length(x)-1)[length(x)-1])
+  testPred$KLe <- apply(testPred[,which(!names(testPred) %in% c("Diff"))], 1, function(x) KL.empirical(y1 = as.numeric(x), y2 = rep(1/class_n, class_n)) )
+  testPred$BestVotesPercent <- apply(testPred[,which(!names(testPred) %in% c("Diff","KLe"))],1, function(x) max(x)  )
+  testPred$Prediction <- predict(model, TestData, type="raw")
+
+  #Flag cell type prediction if Kullback-Leibler divergence value is higher than 0.5 OR the difference between the highest and the second highest percent vote (Diff) is higher than two time of random vote rate (2/class_n)
+  testPred <- testPred %>% as.tibble() %>% mutate(Intermediate = Prediction ) %>% as.data.frame()
+  testPred <- testPred %>% as.tibble() %>% mutate(Prediction = if_else( (KLe <= 0.25) | (Diff <= 2/class_n), "Undetermined", as.character(Prediction) )) %>% as.data.frame()
+  testPred <- testPred %>% as.tibble() %>% mutate(PredictionStatus = if_else( (KLe <= 0.25) | (Diff <= 2/class_n), "Undetermined", "Detected")) %>% as.data.frame()
+  #testPred <- testPred %>% as.tibble() %>% mutate(Prediction = ifelse( (KLe <= 0.5) | (Diff <= 2/class_n), "Unclassified", as.character(Prediction) )) %>% as.data.frame()
+
+  if(missing(priorLabels)){
+    print("Prior class labels are not provided!")
+
+  }else{
+    #Provided prior class labels (priorLabels) has to be a dataframe with same rownames as input testExpSet with one column storing labels.
+    priorLabels <- as.data.frame(priorLabels)
+    colnames(priorLabels) <- c("Prior")
+    testPred <- cbind(testPred, priorLabels)
+
+    #Plot the crosscheck here:
+    #Crosscheck Predictions
+    #  library(tidyverse)
+    #  library(alluvial)
+    #  library(ggalluvial)
+    crx <- testPred %>% group_by(Prior, Intermediate, Prediction) %>% tally() %>% as.data.frame()
+
+    p5 <- ggplot(crx,aes(y = n, axis1 = Prior, axis2 = Intermediate, axis3 = Prediction )) +
+      geom_alluvium(aes(fill = Prediction), width = 1/12) +
+      geom_stratum(width = 1/12, fill = "black", color = "grey") +
+      geom_label(stat = "stratum", label.strata = TRUE) +
+      scale_x_discrete(limits = c("Prior", "Int-Prediction", "Final-Prediction"), expand = c(.05, .05)) +
+      ggtitle("Predictions Cross-Check")
+
+    cowplot::save_plot(filename = paste(outputFilename,".prediction-crosscheck.pdf",sep=""),plot = p5, base_height = 16, base_width = 20)
+
+  }
+
+  if(!missing(SeuratObject)){
+
+    SeuratObject@meta.data <- SeuratObject@meta.data[,which(!colnames(SeuratObject@meta.data) %in% colnames(testPred))]
+    SeuratObject@meta.data <- cbind(SeuratObject@meta.data, testPred)
+
+    PlotPredictions(SeuratObject = SeuratObject, model = model, outputFilename = outputFilename)
+
+    return(SeuratObject)
+  }else{
+    print("Prediction output is being exported ...")
+    rownames(testPred) <- rownames(testExpSet)
+    return(testPred)
+  }#Closes missing(SeuratObj)
+}#closes the function
 
