@@ -11,7 +11,7 @@
 #' 2. Merge some nodes into one to generate a non-redundant tree. Binary to multiple-nodes...
 #' 3. DONE. Implement paralel processing. library(doParallel) rCluster <- makePSOCKcluster(6) registerDoParallel(rCluster)
 #' 4. BANNER for repo; A tree topology and A neuronal cell projecting datasets from axons to snaps where the query datasets are. --> use as a banner.
-#' 5. Don't use more than 1000 samples per class. optional Predictor number.
+#' 5. Don't use more than 1000 samples per class. optional Predictor number. Probably in the SubsetTData function.
 #'
 
 

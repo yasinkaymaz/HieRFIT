@@ -1,0 +1,237 @@
+
+
+
+#' A wrapper function for quick data processing with Seurat functions
+#' This function allows to determine highly variable genes and scale their expression,
+#' run PCA, tSNE, and cluster detection.
+#' @param SeuratObj a Seurat S4 object.
+#' @param scale.only.var a boolean variable to determine whether to scale entire data or only highly variable genes. Default is True.
+#' @param PCs number of PCs to be included in the downstream analysis
+#' @param vars2reg variables to be regressed out when scaling the expression data.
+#' @param perp perplexity parameter to be passed to RunTSNE function from Seurat.
+#' @keywords seurat quick
+#' @export
+#' @examples pbmc <- QuickSeurat(pbmc, scale.only.var=F, PCs=5, perp=20)
+QuickSeurat <- function(SeuratObj, scale.only.var=T, PCs=20, perp=30, vars2reg) {
+
+  SeuratObj <- FindVariableGenes(SeuratObj, do.plot = F, display.progress = F)
+  hv.genes <- head(rownames(SeuratObj@hvg.info), 1000)
+  if (scale.only.var == TRUE) {
+    if (!missing(vars2reg)) {
+      SeuratObj <- ScaleData(SeuratObj, vars.to.regress = vars2reg, genes.use = hv.genes, do.par=T, num.cores = 8)
+    }else{
+      SeuratObj <- ScaleData(SeuratObj, genes.use = hv.genes, do.par=T, num.cores = 8)
+    }
+  }else{
+    if (!missing(vars2reg)) {
+      SeuratObj <- ScaleData(SeuratObj, vars.to.regress = vars2reg, do.par=T, num.cores = 8)
+    }else{
+      SeuratObj <- ScaleData(SeuratObj, do.par=T, num.cores = 8)
+    }
+  }
+  SeuratObj <- RunPCA(SeuratObj, pc.genes = hv.genes, do.print = FALSE, pcs.compute=PCs)
+  SeuratObj <- FindClusters(SeuratObj, reduction.type = "pca", dims.use = 1:PCs, resolution = 1, print.output = FALSE, save.SNN = TRUE, force.recalc = T)
+  SeuratObj <- RunTSNE(SeuratObj, dims.use = 1:PCs, do.fast = TRUE, check_duplicates = FALSE)
+
+  return(SeuratObj)
+
+}
+
+#' A function to downsample Seurat object based on cell type identity
+#' @param SeuratObj a Seurat S4 object.
+#' @param IdentityCol the column 'number' in the metadata slot showing the cell type identities.
+#' @example pbmc1 <- DownSizeSeurat(SeuratObj = pbmc, IdentityCol = 7)
+DownSizeSeurat <- function(SeuratObj, IdentityCol, min_n=NULL){
+  cells <- NULL
+  classes <- table(SeuratObj@meta.data[,IdentityCol])
+  print(classes)
+  if(is.null(min_n)){
+    min_n <- min(classes)
+    print(min_n)
+  }
+  for(type in names(classes)){
+    cells <- c(cells, sample(rownames(SeuratObj@meta.data[which(SeuratObj@meta.data[,IdentityCol] == type), ]), size = min_n, replace = F))
+  }
+  downSobj <- SubsetData(object = SeuratObj, cells.use = cells, do.clean=T)
+  return(downSobj)
+}
+
+SeuratWrapper <- function(ExpData, ProjectLabel, NewMeta, Normalize=T, suppressLog=F, scale.only.var=T, PCs=20, perp=30, dump.files=F, min.cells=0, min.genes=0) {
+
+  if (Normalize == TRUE) {print("Assuming the input is in count ...")
+  }else{
+    print("Assuming the input is in TPM ...")
+    if (suppressLog == TRUE) {
+      print("not taking log ...")
+    }else{
+      ExpData <- log1p(ExpData)
+    }
+  }
+
+  SeuratObj <- CreateSeuratObject(raw.data = ExpData, project = ProjectLabel, min.cells=min.cells, min.genes = min.genes)
+
+  if (Normalize == TRUE) {
+    SeuratObj <- NormalizeData(object = SeuratObj)
+  }else{
+    print("Not normalizing the data since TPM is assumed ... ")
+  }
+
+  SeuratObj <- FindVariableGenes(SeuratObj, do.plot = F, display.progress = F)
+
+  hv.genes <- head(rownames(SeuratObj@hvg.info), 1000)
+
+  if (scale.only.var == TRUE) {
+    SeuratObj <- ScaleData(SeuratObj, genes.use = hv.genes, do.par=T, num.cores = 8)
+  }else{
+    SeuratObj <- ScaleData(SeuratObj, do.par=T, num.cores = 8)
+  }
+
+  if (!missing(NewMeta)) {
+    SeuratObj <- AddMetaData(SeuratObj, NewMeta[rownames(SeuratObj@meta.data), ])
+  }else{
+    print("No new meta file is provided. Skipping...")
+  }
+
+  SeuratObj <- RunPCA(SeuratObj, pc.genes = hv.genes, do.print = FALSE, pcs.compute=PCs)
+
+  SeuratObj <- FindClusters(SeuratObj, reduction.type = "pca", dims.use = 1:PCs, resolution = 1, print.output = FALSE, save.SNN = TRUE, force.recalc = T)
+
+  SeuratObj <- RunTSNE(SeuratObj, dims.use = 1:PCs, do.fast = TRUE,check_duplicates = FALSE, perplexity=perp)
+
+  pdf(paste(ProjectLabel,".plots.pdf", sep=""), width=8, height = 8)
+  PCAPlot(SeuratObj, dim.1 = 1, dim.2 = 2)
+  PCElbowPlot(SeuratObj, num.pc = PCs)
+  TSNEPlot(SeuratObj, do.label = TRUE)
+  dev.off()
+
+  if (dump.files == T) {
+    #Export the tSNE coordinates along with the Cluster assignment IDs
+    rownames_to_column(as.data.frame(SeuratObj@dr$tsne@cell.embeddings))  %>%
+      as.tibble() %>%
+      add_column(Clusters=SeuratObj@meta.data$res.1) %>%
+      dplyr::rename(Cellname = rowname) %>%
+      as_data_frame() %>% write_csv(paste(ProjectLabel, "_tSNECoordinates_Clusters.csv", sep=""))
+
+    #Export Normalized and Scaled Expression matrix for cells and genes in the analysis
+    rownames_to_column(as.data.frame(as.matrix(SeuratObj@data))) %>%
+      dplyr::rename(GeneName = rowname) %>%
+      as_data_frame() %>%
+      write_delim(paste(ProjectLabel, "_Normalized_Expression_matrix.txt", sep=""))
+  }
+
+  save(SeuratObj, file=paste(ProjectLabel, ".seurat.Robj", sep=""))
+  return(SeuratObj)
+}
+
+SeuratCCAmerger <- function(listofObjects) {
+  # Determine genes to use for CCA, must be highly variable in at least 2 datasets
+  #ob.list <- list(zeisel, romanov, tasic, marques)
+  ob.list <- listofObjects
+  genesuse <- c()
+  ids=NULL
+  for (i in 1:length(ob.list)) {
+    genesuse <- c(genesuse, head(rownames(ob.list[[i]]@hvg.info), 1000))
+    ob.list[[i]]@meta.data$dataSource <- paste("id", i, sep="")
+    ids <- c(ids, paste("id", i, sep=""))
+  }
+  genesuse <- names(which(table(genesuse) > 1))
+  for (i in 1:length(ob.list)) {
+    genesuse <- genesuse[genesuse %in% rownames(ob.list[[i]]@scale.data)]
+  }
+
+  if (length(ob.list) > 2) {
+    # Run multi-set CCA
+    integrated <- RunMultiCCA(ob.list, genes.use = genesuse, num.ccs = 15, add.cell.ids = ids)
+    # Run rare non-overlapping filtering
+    integrated <- CalcVarExpRatio(object = integrated, reduction.type = "pca", dims.use = 1:10, grouping.var = "dataSource")
+    integrated <- SubsetData(integrated, subset.name = "var.ratio.pca", accept.low = 0.5)
+  }else{
+    #integrated <- RunCCA(object = ob.list[[1]], object2 = ob.list[[2]], genes.use = genesuse, num.cc = 15, add.cell.id = ids)
+    integrated <- RunCCA(object = ob.list[[1]], object2 = ob.list[[2]], genes.use = genesuse, num.cc = 15)
+  }
+  # Alignment
+  integrated <- AlignSubspace(integrated, reduction.type = "cca", dims.align = 1:10, grouping.var = "dataSource")
+  # t-SNE and Clustering
+  integrated <- FindClusters(integrated, reduction.type = "cca.aligned", dims.use = 1:10, save.SNN = T, resolution = 0.4)
+  integrated <- RunTSNE(integrated, reduction.use = "cca.aligned", dims.use = 1:10)
+  save(integrated, file="integrated.Aligned.seurat.Robj")
+  return(integrated)
+}
+
+CellTyper <- function(SeuratObject, testExpSet, model, priorLabels, outputFilename="plotpredictions"){
+
+  if(!missing(SeuratObject)){
+    testExpSet <- t(as.matrix(SeuratObject@data))
+  }else{
+    print("Expression matrix is provided...")
+    testExpSet <- t(as.matrix(testExpSet))
+  }#Closes missing(SeuratObj)
+  colnames(testExpSet) <- make.names(colnames(testExpSet))
+  #Prepare Test Expression set
+  testsub <- testExpSet[,which(colnames(testExpSet) %in% attributes(model$terms)$term.labels)]
+  missingGenes <- attributes(model$terms)$term.labels[which(!attributes(model$terms)$term.labels %in% colnames(testExpSet))]
+  print(missingGenes)
+  missingGenes.df <- data.frame(matrix(0, ncol = length(missingGenes), nrow = length(rownames(testExpSet))))
+  colnames(missingGenes.df) <- missingGenes
+  TestData <- cbind(testsub, missingGenes.df)
+  TestData <- TestData[,attributes(model$terms)$term.labels]
+  cat("Number of Features (genes) to be considered is", length(colnames(testsub)), '\n', "Number of missing Features set to zero is", length(missingGenes), '\n', sep = ' ')
+
+  rm(testsub, missingGenes, missingGenes.df)
+  gc()
+  #Predict
+  # library(entropy)
+  testPred <- as.data.frame(predict(model, TestData, type = "prob"))
+  class_n <- length(model$classes)
+  testPred$Diff <- apply(testPred, 1, function(x) max(x)-sort(x,partial=length(x)-1)[length(x)-1])
+  testPred$KLe <- apply(testPred[,which(!names(testPred) %in% c("Diff"))], 1, function(x) KL.empirical(y1 = as.numeric(x), y2 = rep(1/class_n, class_n)) )
+  testPred$BestVotesPercent <- apply(testPred[,which(!names(testPred) %in% c("Diff","KLe"))],1, function(x) max(x)  )
+  testPred$Prediction <- predict(model, TestData, type="raw")
+
+  #Flag cell type prediction if Kullback-Leibler divergence value is higher than 0.5 OR the difference between the highest and the second highest percent vote (Diff) is higher than two time of random vote rate (2/class_n)
+  testPred <- testPred %>% as.tibble() %>% mutate(Intermediate = Prediction ) %>% as.data.frame()
+  testPred <- testPred %>% as.tibble() %>% mutate(Prediction = if_else( (KLe <= 0.25) | (Diff <= 2/class_n), "Undetermined", as.character(Prediction) )) %>% as.data.frame()
+  testPred <- testPred %>% as.tibble() %>% mutate(PredictionStatus = if_else( (KLe <= 0.25) | (Diff <= 2/class_n), "Undetermined", "Detected")) %>% as.data.frame()
+  #testPred <- testPred %>% as.tibble() %>% mutate(Prediction = ifelse( (KLe <= 0.5) | (Diff <= 2/class_n), "Unclassified", as.character(Prediction) )) %>% as.data.frame()
+
+  if(missing(priorLabels)){
+    print("Prior class labels are not provided!")
+
+  }else{
+    #Provided prior class labels (priorLabels) has to be a dataframe with same rownames as input testExpSet with one column storing labels.
+    priorLabels <- as.data.frame(priorLabels)
+    colnames(priorLabels) <- c("Prior")
+    testPred <- cbind(testPred, priorLabels)
+
+    #Plot the crosscheck here:
+    #Crosscheck Predictions
+    #  library(tidyverse)
+    #  library(alluvial)
+    #  library(ggalluvial)
+    crx <- testPred %>% group_by(Prior, Intermediate, Prediction) %>% tally() %>% as.data.frame()
+
+    p5 <- ggplot(crx,aes(y = n, axis1 = Prior, axis2 = Intermediate, axis3 = Prediction )) +
+      geom_alluvium(aes(fill = Prediction), width = 1/12) +
+      geom_stratum(width = 1/12, fill = "black", color = "grey") +
+      geom_label(stat = "stratum", label.strata = TRUE) +
+      scale_x_discrete(limits = c("Prior", "Int-Prediction", "Final-Prediction"), expand = c(.05, .05)) +
+      ggtitle("Predictions Cross-Check")
+
+    cowplot::save_plot(filename = paste(outputFilename,".prediction-crosscheck.pdf",sep=""),plot = p5, base_height = 16, base_width = 20)
+
+  }
+
+  if(!missing(SeuratObject)){
+
+    SeuratObject@meta.data <- SeuratObject@meta.data[,which(!colnames(SeuratObject@meta.data) %in% colnames(testPred))]
+    SeuratObject@meta.data <- cbind(SeuratObject@meta.data, testPred)
+
+    PlotPredictions(SeuratObject = SeuratObject, model = model, outputFilename = outputFilename)
+
+    return(SeuratObject)
+  }else{
+    print("Prediction output is being exported ...")
+    rownames(testPred) <- rownames(testExpSet)
+    return(testPred)
+  }#Closes missing(SeuratObj)
+}#closes the function
