@@ -1,4 +1,4 @@
-# HieRFIT
+# HieRFIT . /ˈhaɪɜr/ /ˈfɪt/
 Hierarchical Random Forest for Information Transfer
 
 
