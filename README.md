@@ -38,26 +38,14 @@ new.pbmc.data <- Read10X("~/data/pbmc_10k_v3/filtered_feature_bc_matrix/")
 #The function SeuratWrapper is a wrapper function for quick processing.
 newPBMC <- SeuratWrapper(ExpData = new.pbmc.data, ProjectLabel = "newPBMC", Normalize = T, scale.only.var = T, PCs = 10, dump.files = F )
 
-dim(newPBMC@meta.data)
 ```
-[1] 2638    7
 
 
 Load the reference data
 ```{r}
 pbmc <- get(load("~/Documents/RFTyper/pbmc3k_final.Rda"))
 
-head(pbmc@meta.data)
-
 ```
-nGene nUMI orig.ident percent.mito res.0.6 ClusterNames_0.6 res.0.8
-AAACATACAACCAC   781 2421   10X_PBMC  0.030177759       0      CD4 T cells       1
-AAACATTGAGCTAC  1352 4903   10X_PBMC  0.037935958       2          B cells       3
-AAACATTGATCAGC  1131 3149   10X_PBMC  0.008897363       0      CD4 T cells       1
-AAACCGTGCTTCCG   960 2639   10X_PBMC  0.017430845       1  CD14+ Monocytes       5
-AAACCGTGTATGCG   522  981   10X_PBMC  0.012244898       5         NK cells       6
-AAACGCACTGGTAC   782 2164   10X_PBMC  0.016643551       0      CD4 T cells       1
-
 
 Then, create the reference model using the cell class labels. Here, we can use a topology tree for defining relationship between the cell groups ("pbmc3k_tree").
 
