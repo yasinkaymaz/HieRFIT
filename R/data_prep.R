@@ -16,7 +16,8 @@ ParApp <- function() {
 CellRpred <- setClass(Class = "CellRpred",
                       slots = c(Prior = "character",
                                ClassProbilities = "data.frame",
-                               Projection = "character"))
+                               Projection = "character",
+                               Evaluation = "data.frame"))
 
 #' Reference class
 #' @slot model A list of models to be used.
@@ -54,11 +55,21 @@ CreateRef <- function(Ref, ClassLabels, TreeFile=NULL, method="hrf"){
 #' The main function to project reference data on query in order to identify class labels.
 #' @param Query Query data whose components will be labeled with reference data.
 #' @param refMod optional input if model exist already. Default is null and generated from scratch. Input can be an caret model object or a .Rdata file.
+#' @param xSpecies optional argument to specify cross species information transfer. Default is null. Possible options are 'rat2mouse', 'mouse2rat', 'mouse2human', human2mouse. With respect to model data.
 #' @keywords
 #' @export
 #' @examples expRefObj <- get(load("data/exp_refObj.Rdata"))
 #' @examples cpo <- HieRFIT(Query = as.matrix(pbmc1@data), refMod = expRefobj)
-HieRFIT <- function(Query, refMod){
+HieRFIT <- function(Query, refMod, xSpecies=NULL){
+
+  if( !is.null(xSpecies)) {
+    if(xSpecies == "mouse2rat"){ ## pay attention! swapped logic.
+    print("Rat to mouse gene id conversion...")
+    ort <- Gmor(RatGenes = rownames(Query))
+    Query <- Query[which(rownames(Query) %in% ort$external_gene_name), ]
+    rownames(Query) <- ort[match(rownames(Query), ort$external_gene_name),]$mmusculus_homolog_associated_gene_name
+    }
+  }
 
   if(refMod@modtype == "hrf"){
     nodes_P_all <- CTTraverser(Query = Query, tree = refMod@tree[[1]], hiemods = refMod@model)
@@ -66,19 +77,36 @@ HieRFIT <- function(Query, refMod){
     #Run uncertainty function
     #exclude first column with query ids.
     Prediction <- colnames(P_path_prod)[apply(P_path_prod, 1, which.max)]
+    #ScoreEvals
+    ScoreEvals <- ScoreEval(P_path_prod = P_path_prod)
   }else{
-    P_path_prod <- Predictor(model = refMod@model, Query = Query)
+    P_path_prod <- Predictor(model = refMod@model[[1]], Query = Query)
     #Run uncertainty function
     Prediction <- colnames(P_path_prod)[apply(P_path_prod, 1, which.max)]
+    #ScoreEvals
+    ScoreEvals <- ScoreEval(P_path_prod = P_path_prod)
   }
   object <- new(Class = "CellRpred",
                 ClassProbilities = P_path_prod,
-                Projection = Prediction
+                Projection = Prediction,
+                Evaluation = ScoreEvals
                 )
 
   return(object)
 }
 
+
+
+ScoreEval <- function(P_path_prod){
+  library(entropy)
+
+  class_n <- length(colnames(P_path_prod))
+  P_path_prod$Diff <- apply(P_path_prod, 1, function(x) max(x)-sort(x,partial=length(x)-1)[length(x)-1])
+  P_path_prod$KLe <- apply(P_path_prod[,which(!names(P_path_prod) %in% c("Diff"))], 1, function(x) KL.empirical(y1 = as.numeric(x), y2 = rep(1/class_n, class_n)) )
+  P_path_prod$BestScore <- apply(P_path_prod[,which(!names(P_path_prod) %in% c("Diff","KLe"))],1, function(x) max(x)  )
+  PredEval <- P_path_prod
+ return(PredEval)
+}
 
 #' An internal function to collect model training parameters and direct them to model creation.
 #' @param ExpData a Normalized expression data matrix, genes in rows and samples in columns.
@@ -105,6 +133,7 @@ Modeller <- function(ExpData, ClassLabels=NULL, mod.meth="rf", cv.k=5, thread=NU
                             mod.meth = mod.meth,
                             train.control = train.control,
                             ...)
+                            model <- list(model)
   } else if(mod.meth == "svmLinear"){
     model <- SvmWrap(ExpData = ExpData,
                      ClassLabels = ClassLabels,
@@ -112,6 +141,7 @@ Modeller <- function(ExpData, ClassLabels=NULL, mod.meth="rf", cv.k=5, thread=NU
                      mod.meth = mod.meth,
                      train.control = train.control,
                      ...)
+                     model <- list(model)
   } else if(mod.meth == "hrf"){
     try(if(missing(tree)|| missing(ClassLabels) || missing(ExpData))
       stop("Please, provide the required inputs!"))
@@ -566,4 +596,3 @@ ClassProbCalculator <- function(tree, nodes_P_all){
   }
   return(P_path_prod)
 }
-

@@ -1,6 +1,44 @@
 
 
 
+#' Homology mapping via orhologous genes between mouse and rat.
+Gmor <- function(RatGenes){
+  # This function retrieves mouse homolog associated gene names of Rat genes.
+  library(biomaRt)
+  ensembl.rat <- useMart("ensembl", dataset = "rnorvegicus_gene_ensembl")
+  R2M.ort <- getBM(attributes = c("external_gene_name",
+                                  "mmusculus_homolog_associated_gene_name",
+                                  "mmusculus_homolog_orthology_confidence",
+                                  "mmusculus_homolog_orthology_type",
+                                  "ensembl_gene_id",
+                                  "mmusculus_homolog_ensembl_gene"),
+                   filters = 'external_gene_name',
+                   values = RatGenes,
+                   uniqueRows = T,
+                   mart = ensembl.rat)
+  R2M.ort <- R2M.ort[which(R2M.ort$mmusculus_homolog_orthology_confidence == "1"), ]
+  R2M.ort <- R2M.ort[which(R2M.ort$mmusculus_homolog_orthology_type == "ortholog_one2one"), ]
+  return(R2M.ort)
+}
+
+
+RAMmerger <- function(RatObj, MouseObj){
+  ort <- Gmor(RatGenes = rownames(RatObj@data))
+  mm.data <- as.matrix(MouseObj@raw.data[which(rownames(MouseObj@raw.data) %in% ort$mmusculus_homolog_associated_gene_name),])
+  rownames(mm.data) <- ort[match(rownames(mm.data), ort$mmusculus_homolog_associated_gene_name),]$external_gene_name
+  rownames(mm.data) <- make.names(rownames(mm.data), unique = T)
+  Mouse <- SeuratWrapper(ExpData = mm.data, ProjectLabel = "Mouse_data", NewMeta = MouseObj@meta.data, Normalize = T, dump.files = F)
+
+  Rat.data <- as.matrix(RatObj@raw.data[ort[which(ort$mmusculus_homolog_associated_gene_name %in% rownames(zeisub.data)),]$external_gene_name,])
+  rownames(Rat.data) <- make.names(rownames(Rat.data), unique = T)
+  Rat <- SeuratWrapper(ExpData = Rat.data, ProjectLabel = "Rat_data",  NewMeta = RatObj@meta.data, Normalize = T, dump.files = F)
+
+  ccaMergedMouseRat <- SeuratCCAmerger(listofObjects = c(Mouse, Rat))
+
+  return(ccaMergedMouseRat)
+}
+
+
 #' A wrapper function for quick data processing with Seurat functions
 #' This function allows to determine highly variable genes and scale their expression,
 #' run PCA, tSNE, and cluster detection.
@@ -50,7 +88,11 @@ DownSizeSeurat <- function(SeuratObj, IdentityCol, min_n=NULL){
     print(min_n)
   }
   for(type in names(classes)){
-    cells <- c(cells, sample(rownames(SeuratObj@meta.data[which(SeuratObj@meta.data[,IdentityCol] == type), ]), size = min_n, replace = F))
+    if( classes[type] > min_n ){
+      cells <- c(cells, sample(rownames(SeuratObj@meta.data[which(SeuratObj@meta.data[,IdentityCol] == type), ]), size = min_n, replace = F))
+    }else{
+      cells <- c(cells, sample(rownames(SeuratObj@meta.data[which(SeuratObj@meta.data[,IdentityCol] == type), ]), size = classes[type], replace = F))
+    }
   }
   downSobj <- SubsetData(object = SeuratObj, cells.use = cells, do.clean=T)
   return(downSobj)
