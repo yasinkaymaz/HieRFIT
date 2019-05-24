@@ -3,7 +3,7 @@
 
 ![](extra/HieRFIT_banner.jpg)
 
-One of the applications can be determining major cell types of samples in the single cell RNAseq (scRNAseq) datasets. Common methods for deciding type of the cells often involve manually checking known tissue/cell specific gene expression levels. Sensitive methods for automatically determining cell types is currently lacking. Therefore, our effort is to develop a machine learning approach to predict cell labels using gene expression levels from scRNAseq datasets. This will allow researchers to find out existing cell types in their experimental outcomes and use these predictions to further fine tune their data for downstream analysis, such as marker gene selection, differential expression test, etc.
+Increasing demand for data integration and cross-comparison in bioinformatics drive the need for new methods. One of the applications of this R package is determining major cell types of samples in the single cell RNAseq (scRNAseq) datasets. Common methods for deciding type of the cells often involve manually checking known tissue/cell specific gene expression levels. Sensitive methods for automatically determining cell types is currently lacking. Therefore, our effort is to develop a machine learning approach to predict cell labels using gene expression levels from scRNAseq datasets. This will allow researchers to find out existing cell types in their experimental outcomes and use these predictions to further fine tune their data for downstream analysis, such as marker gene selection, differential expression test, etc.
 
 ## How to install
 
@@ -33,7 +33,7 @@ To use as a reference, get the data [PBMC single cell RNAseq data with 2,700 cel
 ```{r}
 library(Seurat)
 # Process the data:
-new.pbmc.data <- Read10X("~/data/pbmc_10k_v3/filtered_feature_bc_matrix/")
+new.pbmc.data <- Read10X("pbmc_10k_v3/filtered_feature_bc_matrix/")
 
 #The function SeuratWrapper is a wrapper function for quick processing.
 newPBMC <- SeuratWrapper(ExpData = new.pbmc.data, ProjectLabel = "newPBMC", Normalize = T, scale.only.var = T, PCs = 10, dump.files = F )
@@ -43,7 +43,7 @@ newPBMC <- SeuratWrapper(ExpData = new.pbmc.data, ProjectLabel = "newPBMC", Norm
 
 Load the reference data
 ```{r}
-pbmc <- get(load("~/Documents/RFTyper/pbmc3k_final.Rda"))
+pbmc <- get(load("pbmc3k_final.Rda"))
 
 ```
 

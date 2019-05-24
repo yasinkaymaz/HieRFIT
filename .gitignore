@@ -1,6 +1,9 @@
 .Rproj.user
 .Rhistory
-.RData
+*.RData
 .Ruserdata
-.data
-.Robj
+*.data
+*.Robj
+*.Rproj
+*.DS_Store
+test/

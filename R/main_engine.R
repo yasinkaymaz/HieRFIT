@@ -35,9 +35,15 @@ RefMod <- setClass(Class = "RefMod",
 #' @param TreeFile An input file to create a hierarchical tree for relationship between class labels. Default is null but required if method 'hrf' is chosen.
 #' @examples pbmc.refmod <- CreateRef(Ref = as.matrix(pbmc@data), ClassLabels = pbmc@meta.data$ClusterNames_0.6, TreeFile = pbmc3k_tree)
 #' @examples
-CreateRef <- function(Ref, ClassLabels, TreeFile=NULL, method="hrf"){
-  #Tree file. Required if method 'hrf' is chosen.
-  tree <- CreateTree(TreeFile)
+CreateRef <- function(Ref, ClassLabels, TreeTable=NULL, method="hrf"){
+
+  if(method == "hrf"){
+    tree <- CreateTree(treeTable = TreeTable)
+  }
+
+  #Replace white space with '_'
+  ClassLabels <- gsub(ClassLabels, pattern = " ", replacement = "_")
+  print(ClassLabels)
   #Create predictive model structure. No need to create if exists.
   print("Training model... This may take some time... Please, be patient!")
   model <- Modeller(ExpData = Ref,
@@ -95,15 +101,13 @@ HieRFIT <- function(Query, refMod, xSpecies=NULL){
   return(object)
 }
 
-
-
 ScoreEval <- function(P_path_prod){
-  library(entropy)
+  #library(entropy)
 
   class_n <- length(colnames(P_path_prod))
-  P_path_prod$Diff <- apply(P_path_prod, 1, function(x) max(x)-sort(x,partial=length(x)-1)[length(x)-1])
-  P_path_prod$KLe <- apply(P_path_prod[,which(!names(P_path_prod) %in% c("Diff"))], 1, function(x) KL.empirical(y1 = as.numeric(x), y2 = rep(1/class_n, class_n)) )
-  P_path_prod$BestScore <- apply(P_path_prod[,which(!names(P_path_prod) %in% c("Diff","KLe"))],1, function(x) max(x)  )
+  P_path_prod$Diff <- apply(P_path_prod, 1, function(x) max(x) - sort(x, partial=length(x) - 1)[length(x) - 1])
+  P_path_prod$KLe <- apply(P_path_prod[, which(!names(P_path_prod) %in% c("Diff"))], 1, function(x) entropy::KL.empirical(y1 = as.numeric(x), y2 = rep(1/class_n, class_n)))
+  P_path_prod$BestScore <- apply(P_path_prod[, which(!names(P_path_prod) %in% c("Diff","KLe"))], 1, function(x) max(x))
   PredEval <- P_path_prod
  return(PredEval)
 }
@@ -165,7 +169,7 @@ RandForestWrap <- function(ExpData=ExpData, ClassLabels=ClassLabels, prefix, mod
                              PCs = 10,
                              num = 200,
                              prefix = prefix,
-                             spitPlots = F, ...)
+                             doPlots = F, ...)
   #2. Prepare the reference data.
   RefData <- DataReshaper(ExpData = ExpData,
                           Predictors = P_dicts,
@@ -199,7 +203,7 @@ SvmWrap <- function(ExpData=ExpData, ClassLabels=ClassLabels, prefix, mod.meth, 
                              PCs = 10,
                              num = 200,
                              prefix = prefix,
-                             spitPlots = F, ...)
+                             doPlots = F, ...)
   #2. Prepare the reference data.
   RefData <- DataReshaper(ExpData = ExpData,
                           Predictors = P_dicts,
@@ -221,48 +225,6 @@ SvmWrap <- function(ExpData=ExpData, ClassLabels=ClassLabels, prefix, mod.meth, 
   return(model)
 }
 
-#' An internal function to create hierarchical classification models (hiemods) with random forest.
-#' @param ExpData a Normalized expression data matrix, genes in rows and samples in columns.
-#' @param ClassLabels A list of class labels for cells/samples in the ExpData matrix. Same length as colnames(ExpData).
-#' @param tree A tree storing relatinship between the class labels. Default is null. required when mod.meth "hrf" is chosen.
-#' @param thread number of workers to be used for parallel processing. Default is Null, so serial processing.
-#' @keywords
-#' @export
-#' @examples
-HieRandForest <- function(ExpData=ExpData, ClassLabels=ClassLabels, tree, thread=3){
-  library(doParallel)
-  node.list <- DigestTree(tree = tree)
-  hiemods <- vector("list", length = max(node.list))
-
-  Tdata <- DataReshaper(ExpData = ExpData, Predictors = make.names(rownames(ExpData)), ClassLabels = ClassLabels)
-
-  if(is.null(thread)){
-    #Build a local classifier for each node in the tree. Binary or multi-class mixed.
-    for(i in node.list){
-      hiemods[[i]] <- NodeTrainer(Tdata = Tdata, tree = tree, node = i)
-    } #closes the for loop.
-
-  }else{# thread is specified. For now, use this only when running on bigMem machines.
-    cl <- makePSOCKcluster(thread)
-    registerDoParallel(cl)
-    print(paste("registered cores is", getDoParWorkers(), sep = " "))
-
-    out <- foreach(i=node.list, .packages = c('ggplot2'), .inorder = TRUE) %dopar% {
-      NodeTrainer(Tdata = Tdata, tree = tree, node = i)
-    }
-    stopCluster(cl)
-
-    for(x in 1:length(out)){
-      hiemods[node.list[x]] <- out[x]
-    }
-  }
-
-  names(hiemods) <- seq_along(hiemods)
-  hiemods[sapply(hiemods, is.null)] <- NULL
-
-  return(hiemods)
-}
-
 #' A function used internally for selecting genes based on their weight in the top principle components.
 #' @description p: pca object, pcs: number of PCs to include, num: number of genes from top and bottom.
 #' Weighted gene picking depending on PC number: Initial PCs give more genes.
@@ -271,31 +233,21 @@ HieRandForest <- function(ExpData=ExpData, ClassLabels=ClassLabels, tree, thread
 #' @param ClassLabels A list of class labels for cells/samples in the ExpData matrix. Same length as colnames(ExpData).
 #' @param PCs the number of PCs to be looked at when selecting genes. Default is 40.
 #' @param num the number of Predictors (genes) in total to be included. Default is 2000.
-#' @param spitPlots boolean to generate a pdf for PCA plots. Default is False.
+#' @param doPlots boolean to generate a pdf for PCA plots. Default is False.
 #' @param prefix a prefix to separate each run.
 #' @keywords PCA loadings selection
 #' @export
 #' @examples Predictors <- FeatureSelector(ExpData = as.matrix(SeuratObject@data), PCs = 10, num = 2000)
-FeatureSelector <- function(ExpData, ClassLabels, PCs=40, num=2000, spitPlots=F, prefix="Feature.select") {
+FeatureSelector <- function(ExpData, ClassLabels, PCs=40, num=2000, doPlots=F, prefix="Feature.select") {
   library(dplyr)
   #Transpose the matrix cols <--> rows t()
   TData <- DataReshaper(ExpData = ExpData)
-
-  if (file.exists(paste(prefix,"train.prcomp.Rdata",sep="."))) {
-    warning("An existing PCA data is found in the directory! Used it instead...")
-#    pcatrain <- get(load(paste(prefix,"train.prcomp.Rdata",sep=".")))
-    pcatrain <- prcomp(TData, center = TRUE, scale=TRUE, rank. = PCs)
-  }else{
-    print("Performing PCA...")
-    pcatrain <- prcomp(TData, center = TRUE, scale=TRUE, rank. = PCs)
-#    save(pcatrain,file=paste(prefix,"train.prcomp.Rdata",sep="."))
-  }
-
+  #do pca
+  pcatrain <- prcomp(TData, center = TRUE, scale=TRUE, rank. = PCs)
   pcadata <- data.frame(pcatrain$x, ClassLabels = ClassLabels)
   class_n=length(levels(pcadata$ClassLabels))
 
   print("Testing the PCs for classification...")
-  save(pcadata,file=paste(prefix,"train.pcadata.Rdata",sep="."))
   #Select only PCs which are significanly separating at least one of the class.
   is_significant <- function(x) any(as.numeric(x) <= 0.05)
 
@@ -332,7 +284,7 @@ FeatureSelector <- function(ExpData, ClassLabels, PCs=40, num=2000, spitPlots=F,
     cat("\n", 'Picking the best genes from', PCs.sig[i], ' is completed.', "\n")
   }
 
-  if (spitPlots == TRUE) {
+  if (doPlots == TRUE) {
     pdf(paste(prefix,"_PCA_eval_p.pdf",sep=""),width = PCs+5, height = class_n/1.2)
     pheatmap::pheatmap(-1*log10(PCs.sig.table+.000001), cluster_cols = F, treeheight_row = 0, cellheight = 10, cellwidth = 10)
     dev.off()
@@ -396,45 +348,6 @@ DataReshaper <- function(ExpData, Predictors, ClassLabels, alpa=0.1, ...) {
   }
 }
 
-#' A hierarchical Classifier Tree Traverser function.
-#' @param Query is the input query data. rows are genes and columns are cells.
-#' @param tree a tree topology with which hrf model was trained on. 'phylo' format.
-#' @param hiemods models list from HieRandForest function.
-#' @param thread number of workers to be used for parallel processing. Default is Null, so serial processing.
-CTTraverser <- function(Query, tree, hiemods, thread=NULL){
-  library(doParallel)
-  node.list <- DigestTree(tree = tree)
-  #Create a table for storing node probabilities.
-  ProbTab <- data.frame(Queries = colnames(Query))
-
-  if(is.null(thread)){
-    #Build a local classifier for each node in the tree. Binary or multi-class mixed.
-    for(i in node.list){
-      nodeProb <- Predictor(model = hiemods[[as.character(i)]],
-                            format = "prob",
-                            Query = Query,
-                            node = i)
-      ProbTab <- cbind(ProbTab, nodeProb)
-    } #closes the for loop.
-
-  }else{# thread is specified. For now, use this only when running on bigMem machines.
-    cl <- makePSOCKcluster(thread)
-    registerDoParallel(cl)
-    print(paste("registered cores is", getDoParWorkers(), sep = " "))
-
-    nodeProb <- foreach(i=node.list, .inorder = TRUE, .combine=cbind) %dopar% {
-      Predictor(model = hiemods[[as.character(i)]],
-                format = "prob",
-                Query = Query,
-                node = i)
-    }
-    stopCluster(cl)
-    ProbTab <- cbind(ProbTab, nodeProb)
-  }
-
-  return(ProbTab)
-}
-
 #'
 #' @param model
 #' @param Query
@@ -458,141 +371,4 @@ Predictor <- function(model, Query, format="prob", node=NULL){
     }
   }
   return(QuePred)
-}
-
-
-#' Function to generate a random tree using 'ape' package.
-#' Returns a tree object.
-#' @param LN The target number of leafs in the tree. Default is 8.
-RandTreeSim <- function(LN=8, furcation="binary"){
-  if (furcation == "binary"){
-    tree <- ape::rtree(n = LN, br = NULL)
-    plot(tree, edge.width = 2)
-    tree$edge
-  } else if (furcation == "multi"){#Fix this.
-    tiplabs <- paste("t", seq(1:LN), sep = "")
-    while (length(tiplabs) > 0){
-      sub <- sample(tiplabs, size = sample(seq(1:length(tiplabs)-1)), replace = F)
-      print(sub)
-      tiplabs <- tiplabs[which(!tiplabs %in% sub)]
-    }
-    tree <- ape::read.tree(text="(((L, K), E, F), (G, H));")
-  }
-  return(tree)
-}
-
-CreateTree <- function(x){
-  #Create a tree:
-  final.text <- "((CD8.T.cells, CD4.T.cells), (CD14..Monocytes, FCGR3A..Monocytes), Dendritic.cells, NK.cells, B.cells, Megakaryocytes);"
-  tree <- ape::read.tree(text=final.text)
-  L <- list(T_cells = "T.cells", Monocytes = "Monocytes", Pbmc = c("T.cells", "Monocytes"))
-  tree <- ape::makeNodeLabel(tree, "u", nodeList = L)
-
-  return(tree)
-} # Fix dummy input
-
-CheckTreeIntegrity <- function(){}
-
-DigestTree <- function(tree) {
-  all.nodes <- unique(tree$edge[,1])
-  return(all.nodes)
-}
-
-#' A function to retrieve corresponding leafs of the child nodes of a given node.
-#' @param tree A tree storing relatinship between the class labels.
-#' @param node a particular non-terminal node in the tree.
-GetChildNodeLeafs <- function(tree, node){
-  #Get the children nodes.
-  children <- tree$edge[which(tree$edge[, 1] == node), 2]
-  #store ordered tips
-  is_tip <- tree$edge[,2] <= length(tree$tip.label)
-  ordered_tips <- tree$edge[is_tip, 2]
-  #Then extract all leafs below these children
-  c.tips <- list()
-  for (c in children){
-    if(c > length(tree$tip.label)){
-      print(paste("extracting tips for node", c, sep=" "))
-      c.tips[[c]] <- ape::extract.clade(tree, c)$tip.label
-    }else{
-      c.tips[[c]] <- tree$tip.label[ordered_tips][match(c, ordered_tips)]
-    }
-  }
-  return(c.tips)
-}
-
-SubsetTData <- function(Tdata, tree, node){
-  #This function subsets a Tdata with class labels (trainingData - output of DataReshaper)
-  #And updates the class labels.
-  # 1. Extract the data under the node. Subsample if necessary.
-  childNodes <- GetChildNodeLeafs(tree = tree, node = node)
-
-  SubTdata <- NULL
-  #loop through child nodes that are not null in the list.
-  for (i in which(lapply(childNodes, length) > 0)){
-
-    Subdata <- droplevels(Tdata[which(Tdata$ClassLabels %in% childNodes[i][[1]]), ])
-
-    if (i > length(tree$tip.label)){# if the node is not a leaf node, then
-      if(!is.null(tree$node.label)){# if labels for subnodes exist
-        labels <- c(tree$tip.label, tree$node.label)
-        #Replace labels with subnode labels.
-        Subdata$ClassLabels <- as.factor(labels[i])
-        print(paste("For Node", i, "the label is:", labels[i], sep = " "))
-      } else {
-        #if subnodes don't exist, replace class tip labels with childnode label.
-        Subdata$ClassLabels <- as.factor(i)
-      }
-    } else {#if the node is a terminal leaf
-      #Replace class tip labels with Leaf labels.
-      Subdata$ClassLabels <- as.factor(childNodes[i][[1]])
-    }
-    #Combine with all other child node data
-    SubTdata <- rbind(SubTdata, Subdata)
-  }
-  return(t(SubTdata))
-}
-
-NodeTrainer <- function(Tdata, tree, node){
-  print(paste("Node id: ", node))
-  node.ExpData <- SubsetTData(Tdata = Tdata, tree = tree, node = node)
-  node.ClassLabels <- node.ExpData["ClassLabels", ]
-  node.ExpData <- node.ExpData[which(!rownames(node.ExpData) %in% c("ClassLabels")), ]
-
-  node.mod <- Modeller(ExpData = node.ExpData,
-                         ClassLabels = node.ClassLabels,
-                         mod.meth="rf",
-                         cv.k=2,
-                         save.int.f=FALSE)
-  return(node.mod)
-}
-
-GetAncestPath <- function(tree, class){
-  path <- c()
-  labs_l <- c(tree$tip.label, tree$node.label)
-  Node <- match(class, labs_l)
-  parent <- tree$edge[which(x = tree$edge[, 2] == Node), ][1]
-  while(!is.na(parent)){
-    path <- c(path, paste(parent, class, sep = ""))
-    class <- labs_l[parent]
-    parent <- tree$edge[which(x = tree$edge[, 2] == parent), ][1]
-  }
-  return(path)
-}
-
-#' A function to calculate class scores for all internal and tip node classes.
-#' @param tree
-#' @param nodes_P_all a table output from CTTraverser() which contains all class probabilities from every node.
-#' @return P_path_prod a table for products of ancestor node scores.
-ClassProbCalculator <- function(tree, nodes_P_all){
-  #CTip_table <- data.frame(matrix(ncol = 0, nrow = length(rownames(Htable))))
-  P_path_prod <- data.frame(row.names = rownames(nodes_P_all))
-  clabs <- c(tree$tip.label, tree$node.label)[tree$edge[, 2]]
-
-  for(cl in clabs){
-    map <- GetAncestPath(tree = tree, class = cl)
-    nt_prob <- data.frame(matrixStats::rowProds(as.matrix(nodes_P_all[, map])))
-    colnames(nt_prob) <- cl
-    P_path_prod <- cbind(P_path_prod, nt_prob)
-  }
-  return(P_path_prod)
 }

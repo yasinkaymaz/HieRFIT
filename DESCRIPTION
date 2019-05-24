@@ -1,6 +1,6 @@
-Package: cellRtools
+Package: HieRFIT
 Type: Package
-Title: This package provides a collection of functions to analyze single cell RNAseq datasets.
+Title: This package provides a utility for information transfer between various data collections using hierarchical random forest
 Version: 0.1.0
 Author: Yasin Kaymaz, Bioinformatics Scientist, Harvard University
 Author@R: person("Yasin", "Kaymaz", email = "yasinkaymaz@gmail.com",role = c("aut", "cre"))
@@ -13,7 +13,10 @@ LazyData: true
 Imports:
     Matrix,
     ape,
+    data.tree,
     caret,
     dplyr,
+    entropy,
+    biomaRt,
     doParallel
 RoxygenNote: 6.1.1

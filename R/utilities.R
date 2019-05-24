@@ -4,9 +4,9 @@
 #' Homology mapping via orhologous genes between mouse and rat.
 Gmor <- function(RatGenes){
   # This function retrieves mouse homolog associated gene names of Rat genes.
-  library(biomaRt)
-  ensembl.rat <- useMart("ensembl", dataset = "rnorvegicus_gene_ensembl")
-  R2M.ort <- getBM(attributes = c("external_gene_name",
+  #library(biomaRt)
+  ensembl.rat <- biomaRt::useMart("ensembl", dataset = "rnorvegicus_gene_ensembl")
+  R2M.ort <- biomaRt::getBM(attributes = c("external_gene_name",
                                   "mmusculus_homolog_associated_gene_name",
                                   "mmusculus_homolog_orthology_confidence",
                                   "mmusculus_homolog_orthology_type",
