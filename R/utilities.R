@@ -134,7 +134,6 @@ SeuratWrapper <- function(ExpData, ProjectLabel, NewMeta, Normalize=T, suppressL
   }
 
   SeuratObj <- FindVariableGenes(SeuratObj, do.plot = F, display.progress = F)
-
   hv.genes <- head(rownames(SeuratObj@hvg.info), 1000)
 
   if (scale.only.var == TRUE) {
@@ -150,16 +149,8 @@ SeuratWrapper <- function(ExpData, ProjectLabel, NewMeta, Normalize=T, suppressL
   }
 
   SeuratObj <- RunPCA(SeuratObj, pc.genes = hv.genes, do.print = FALSE, pcs.compute=PCs)
-
   SeuratObj <- FindClusters(SeuratObj, reduction.type = "pca", dims.use = 1:PCs, resolution = 1, print.output = FALSE, save.SNN = TRUE, force.recalc = T)
-
   SeuratObj <- RunTSNE(SeuratObj, dims.use = 1:PCs, do.fast = TRUE,check_duplicates = FALSE, perplexity=perp)
-
-  pdf(paste(ProjectLabel,".plots.pdf", sep=""), width=8, height = 8)
-  PCAPlot(SeuratObj, dim.1 = 1, dim.2 = 2)
-  PCElbowPlot(SeuratObj, num.pc = PCs)
-  TSNEPlot(SeuratObj, do.label = TRUE)
-  dev.off()
 
   if (dump.files == T) {
     #Export the tSNE coordinates along with the Cluster assignment IDs
@@ -174,9 +165,11 @@ SeuratWrapper <- function(ExpData, ProjectLabel, NewMeta, Normalize=T, suppressL
       dplyr::rename(GeneName = rowname) %>%
       as_data_frame() %>%
       write_delim(paste(ProjectLabel, "_Normalized_Expression_matrix.txt", sep=""))
+
+    #Save seurat object:
+    save(SeuratObj, file=paste(ProjectLabel, ".seurat.Robj", sep=""))
   }
 
-  save(SeuratObj, file=paste(ProjectLabel, ".seurat.Robj", sep=""))
   return(SeuratObj)
 }
 

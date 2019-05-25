@@ -55,7 +55,7 @@ CTTraverser <- function(Query, tree, hiemods, thread=NULL){
   if(is.null(thread)){
     #Build a local classifier for each node in the tree. Binary or multi-class mixed.
     for(i in node.list){
-      nodeProb <- Predictor(model = hiemods[[as.character(i)]],
+      nodeProb <- Predictor(model = hiemods[[as.character(i)]][[1]],
                             format = "prob",
                             Query = Query,
                             node = i)
@@ -68,7 +68,7 @@ CTTraverser <- function(Query, tree, hiemods, thread=NULL){
     print(paste("registered cores is", getDoParWorkers(), sep = " "))
 
     nodeProb <- foreach(i=node.list, .inorder = TRUE, .combine=cbind) %dopar% {
-      Predictor(model = hiemods[[as.character(i)]],
+      Predictor(model = hiemods[[as.character(i)]][[1]],
                 format = "prob",
                 Query = Query,
                 node = i)

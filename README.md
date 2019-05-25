@@ -45,6 +45,9 @@ Load the reference data
 ```{r}
 pbmc <- get(load("pbmc3k_final.Rda"))
 
+# A tree file for cell type hierarchy:
+treeTable <- read.delim("pbmc3k_taxa.txt", header = F)
+
 ```
 
 Then, create the reference model using the cell class labels. Here, we can use a topology tree for defining relationship between the cell groups ("pbmc3k_tree").
@@ -54,18 +57,19 @@ library(HieRFIT)
 
 refmod <- CreateRef(Ref = as.matrix(pbmc@data),
                           ClassLabels = pbmc@meta.data$ClusterNames_0.6,
-                          TreeFile = pbmc3k_tree
-                          )
+                          TreeTable = treeTable)
 
 #Project the cell class labels on the new dataset:
 ProObj <- HieRFIT(Query = as.matrix(newPBMC@data), refMod = refmod)
+
+newPBMC@meta.data$ProjectedCellTypes <- ProObj@Projection
 
 ```
 
 ### How it works:
 
-1. Feature/Predictor selection from significant principal components (PCA).
-2. Build a Hierarchical clustering tree
-3. Create Local Classifiers at each node
-3. Combine local classifiers into a reference model
+1. Feature/predictor selection from significant principal components (PCA),
+2. Build a hierarchical decision tree,
+3. Create local classifiers at each node,
+3. Combine local classifiers into a reference model,
 4. HieRFIT new data using reference.
