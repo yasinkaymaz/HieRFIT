@@ -28,13 +28,12 @@ RefMod <- setClass(Class = "RefMod",
                              tree = "list",
                              modtype = "character"))
 
-#'
+#' The main function for creating a reference model.
 #' @param Ref Reference data from which class labels will be projected on Query data.
 #' @param ClassLabels A list of class labels for cells/samples in the ExpData matrix (Ref). Same length as colnames(Ref).
 #' @param method The model training method, "rf" for random forest, "svmLinear" for support vector machine, "hrf" for hierarchical random forest. Default is "hrf"
 #' @param TreeFile An input file to create a hierarchical tree for relationship between class labels. Default is null but required if method 'hrf' is chosen.
-#' @examples pbmc.refmod <- CreateRef(Ref = as.matrix(pbmc@data), ClassLabels = pbmc@meta.data$ClusterNames_0.6, TreeFile = pbmc3k_tree)
-#' @examples
+#' @usage  pbmc.refmod <- CreateRef(Ref = as.matrix(pbmc@data), ClassLabels = pbmc@meta.data$ClusterNames_0.6, TreeFile = pbmc3k_tree)
 CreateRef <- function(Ref, ClassLabels, TreeTable=NULL, method="hrf"){
 
   if(method == "hrf"){
@@ -43,6 +42,8 @@ CreateRef <- function(Ref, ClassLabels, TreeTable=NULL, method="hrf"){
 
   #Replace white space with '_'
   ClassLabels <- gsub(ClassLabels, pattern = " ", replacement = "_")
+  ClassLabels <- gsub(ClassLabels, pattern = "\\+|-", replacement = ".")
+
   print(ClassLabels)
   #Create predictive model structure. No need to create if exists.
   print("Training model... This may take some time... Please, be patient!")
@@ -64,8 +65,8 @@ CreateRef <- function(Ref, ClassLabels, TreeTable=NULL, method="hrf"){
 #' @param xSpecies optional argument to specify cross species information transfer. Default is null. Possible options are 'rat2mouse', 'mouse2rat', 'mouse2human', human2mouse. With respect to model data.
 #' @keywords
 #' @export
-#' @examples expRefObj <- get(load("data/exp_refObj.Rdata"))
-#' @examples cpo <- HieRFIT(Query = as.matrix(pbmc1@data), refMod = expRefobj)
+#' @usage expRefObj <- get(load("data/exp_refObj.Rdata"))
+#' @usage cpo <- HieRFIT(Query = as.matrix(pbmc1@data), refMod = expRefobj)
 HieRFIT <- function(Query, refMod, xSpecies=NULL){
 
   if( !is.null(xSpecies)) {
@@ -121,7 +122,7 @@ ScoreEval <- function(P_path_prod){
 #' @param save.int.f Boolean to save model. Default is False.
 #' @keywords
 #' @export
-#' @examples rf.model <- Modeller(ExpData = as.matrix(pbmc1@data), ClassLabels = pbmc1@meta.data$ClusterNames_0.6)
+#' @usage rf.model <- Modeller(ExpData = as.matrix(pbmc1@data), ClassLabels = pbmc1@meta.data$ClusterNames_0.6)
 Modeller <- function(ExpData, ClassLabels=NULL, mod.meth="rf", cv.k=5, thread=NULL, tree=NULL, save.int.f=FALSE, ...){
   prefix=paste(cv.k, "K-fold", mod.meth, sep=".")
   #k-fold Cross Validation
@@ -237,7 +238,7 @@ SvmWrap <- function(ExpData=ExpData, ClassLabels=ClassLabels, prefix, mod.meth, 
 #' @param prefix a prefix to separate each run.
 #' @keywords PCA loadings selection
 #' @export
-#' @examples Predictors <- FeatureSelector(ExpData = as.matrix(SeuratObject@data), PCs = 10, num = 2000)
+#' @usage Predictors <- FeatureSelector(ExpData = as.matrix(SeuratObject@data), PCs = 10, num = 2000)
 FeatureSelector <- function(ExpData, ClassLabels, PCs=40, num=2000, doPlots=F, prefix="Feature.select") {
   library(dplyr)
   #Transpose the matrix cols <--> rows t()
@@ -305,7 +306,7 @@ FeatureSelector <- function(ExpData, ClassLabels, PCs=40, num=2000, doPlots=F, p
 #' @param alpa variation cutoff for filtering data
 #' @keywords data preparation
 #' @export
-#' @examples trainingData <- DataReshaper(ExpData = as.matrix(SeuratObject@data), Predictors = genes, ClassLabels = SeuratObject@meta.data$CellTypes)
+#' @usage trainingData <- DataReshaper(ExpData = as.matrix(SeuratObject@data), Predictors = genes, ClassLabels = SeuratObject@meta.data$CellTypes)
 DataReshaper <- function(ExpData, Predictors, ClassLabels, alpa=0.1, ...) {
   if(missing(Predictors)){#prepare the data for PCA
     TData <- as.data.frame(t(ExpData))
@@ -348,7 +349,7 @@ DataReshaper <- function(ExpData, Predictors, ClassLabels, alpa=0.1, ...) {
   }
 }
 
-#'
+#' The predictor function.
 #' @param model
 #' @param Query
 #' @param format type of prediction output, "prob" or "resp".

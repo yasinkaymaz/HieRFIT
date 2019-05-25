@@ -6,7 +6,7 @@
 #' @param thread number of workers to be used for parallel processing. Default is Null, so serial processing.
 #' @keywords
 #' @export
-#' @examples
+#' @usage
 HieRandForest <- function(ExpData=ExpData, ClassLabels=ClassLabels, tree, thread=3){
   library(doParallel)
   node.list <- DigestTree(tree = tree)
@@ -107,12 +107,17 @@ DigestTree <- function(tree) {
 
 #' A function to create a tree in phylo format.
 #' @param treeTable a data table/data.frame storing class relationships with intermediate class labels. Can be read from a tab separated file.
-#' @examples treeTable <- read.delim("TaxonomyRank.tree.txt", header = F)
-#' @examples tree <- CreateTree(treeTable)
+#' @usage treeTable <- read.delim("TaxonomyRank.tree.txt", header = F)
+#' @usage tree <- CreateTree(treeTable)
 CreateTree <- function(treeTable){
   #Create a tree:
+  library(ape)
+  library(data.tree)# '::' doesn't work!
+
+  treeTable <- data.frame(lapply(treeTable, function(x) {gsub("\\+|-", ".", x)}))
+
   treeTable$pathString <- apply(cbind("TaxaRoot", treeTable), 1, paste0, collapse="/")
-  tree <- ape::as.phylo(data.tree::as.Node(treeTable))
+  tree <- as.phylo(as.Node(treeTable))
   return(tree)
 }
 

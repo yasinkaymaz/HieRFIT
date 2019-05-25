@@ -61,3 +61,11 @@ refmod <- CreateRef(Ref = as.matrix(pbmc@data),
 ProObj <- HieRFIT(Query = as.matrix(newPBMC@data), refMod = refmod)
 
 ```
+
+### How it works:
+
+1. Feature/Predictor selection from significant principal components (PCA).
+2. Build a Hierarchical clustering tree
+3. Create Local Classifiers at each node
+3. Combine local classifiers into a reference model
+4. HieRFIT new data using reference.

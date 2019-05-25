@@ -39,6 +39,21 @@ RAMmerger <- function(RatObj, MouseObj){
 }
 
 
+TipBias <- function(tree, confmat){
+  #confmat is table() of Prior/Prediction comparison
+  err.rate <- NULL
+  for(i in 1:length(tree$tip.label)){
+    nn <- length(GetAncestorsPath(tree=tree, i)[[2]])
+    leafErr <- 1-confmat[tree$tip.label[i],tree$tip.label[i]]/sum(confmat[tree$tip.label[i],])
+    print(paste(i,nn,leafErr,sep = "    "))
+    err.rate <- c(err.rate, leafErr)
+  }
+  err.rate <- data.frame(err.rate)
+  rownames(err.rate) <- tree$tip.label
+  return(err.rate)
+}
+
+
 #' A wrapper function for quick data processing with Seurat functions
 #' This function allows to determine highly variable genes and scale their expression,
 #' run PCA, tSNE, and cluster detection.
@@ -49,7 +64,7 @@ RAMmerger <- function(RatObj, MouseObj){
 #' @param perp perplexity parameter to be passed to RunTSNE function from Seurat.
 #' @keywords seurat quick
 #' @export
-#' @examples pbmc <- QuickSeurat(pbmc, scale.only.var=F, PCs=5, perp=20)
+#' @usage pbmc <- QuickSeurat(pbmc, scale.only.var=F, PCs=5, perp=20)
 QuickSeurat <- function(SeuratObj, scale.only.var=T, PCs=20, perp=30, vars2reg) {
 
   SeuratObj <- FindVariableGenes(SeuratObj, do.plot = F, display.progress = F)
@@ -78,7 +93,7 @@ QuickSeurat <- function(SeuratObj, scale.only.var=T, PCs=20, perp=30, vars2reg) 
 #' A function to downsample Seurat object based on cell type identity
 #' @param SeuratObj a Seurat S4 object.
 #' @param IdentityCol the column 'number' in the metadata slot showing the cell type identities.
-#' @example pbmc1 <- DownSizeSeurat(SeuratObj = pbmc, IdentityCol = 7)
+#' @usage pbmc1 <- DownSizeSeurat(SeuratObj = pbmc, IdentityCol = 7)
 DownSizeSeurat <- function(SeuratObj, IdentityCol, min_n=NULL){
   cells <- NULL
   classes <- table(SeuratObj@meta.data[,IdentityCol])
@@ -199,81 +214,3 @@ SeuratCCAmerger <- function(listofObjects) {
   save(integrated, file="integrated.Aligned.seurat.Robj")
   return(integrated)
 }
-
-CellTyper <- function(SeuratObject, testExpSet, model, priorLabels, outputFilename="plotpredictions"){
-
-  if(!missing(SeuratObject)){
-    testExpSet <- t(as.matrix(SeuratObject@data))
-  }else{
-    print("Expression matrix is provided...")
-    testExpSet <- t(as.matrix(testExpSet))
-  }#Closes missing(SeuratObj)
-  colnames(testExpSet) <- make.names(colnames(testExpSet))
-  #Prepare Test Expression set
-  testsub <- testExpSet[,which(colnames(testExpSet) %in% attributes(model$terms)$term.labels)]
-  missingGenes <- attributes(model$terms)$term.labels[which(!attributes(model$terms)$term.labels %in% colnames(testExpSet))]
-  print(missingGenes)
-  missingGenes.df <- data.frame(matrix(0, ncol = length(missingGenes), nrow = length(rownames(testExpSet))))
-  colnames(missingGenes.df) <- missingGenes
-  TestData <- cbind(testsub, missingGenes.df)
-  TestData <- TestData[,attributes(model$terms)$term.labels]
-  cat("Number of Features (genes) to be considered is", length(colnames(testsub)), '\n', "Number of missing Features set to zero is", length(missingGenes), '\n', sep = ' ')
-
-  rm(testsub, missingGenes, missingGenes.df)
-  gc()
-  #Predict
-  # library(entropy)
-  testPred <- as.data.frame(predict(model, TestData, type = "prob"))
-  class_n <- length(model$classes)
-  testPred$Diff <- apply(testPred, 1, function(x) max(x)-sort(x,partial=length(x)-1)[length(x)-1])
-  testPred$KLe <- apply(testPred[,which(!names(testPred) %in% c("Diff"))], 1, function(x) KL.empirical(y1 = as.numeric(x), y2 = rep(1/class_n, class_n)) )
-  testPred$BestVotesPercent <- apply(testPred[,which(!names(testPred) %in% c("Diff","KLe"))],1, function(x) max(x)  )
-  testPred$Prediction <- predict(model, TestData, type="raw")
-
-  #Flag cell type prediction if Kullback-Leibler divergence value is higher than 0.5 OR the difference between the highest and the second highest percent vote (Diff) is higher than two time of random vote rate (2/class_n)
-  testPred <- testPred %>% as.tibble() %>% mutate(Intermediate = Prediction ) %>% as.data.frame()
-  testPred <- testPred %>% as.tibble() %>% mutate(Prediction = if_else( (KLe <= 0.25) | (Diff <= 2/class_n), "Undetermined", as.character(Prediction) )) %>% as.data.frame()
-  testPred <- testPred %>% as.tibble() %>% mutate(PredictionStatus = if_else( (KLe <= 0.25) | (Diff <= 2/class_n), "Undetermined", "Detected")) %>% as.data.frame()
-  #testPred <- testPred %>% as.tibble() %>% mutate(Prediction = ifelse( (KLe <= 0.5) | (Diff <= 2/class_n), "Unclassified", as.character(Prediction) )) %>% as.data.frame()
-
-  if(missing(priorLabels)){
-    print("Prior class labels are not provided!")
-
-  }else{
-    #Provided prior class labels (priorLabels) has to be a dataframe with same rownames as input testExpSet with one column storing labels.
-    priorLabels <- as.data.frame(priorLabels)
-    colnames(priorLabels) <- c("Prior")
-    testPred <- cbind(testPred, priorLabels)
-
-    #Plot the crosscheck here:
-    #Crosscheck Predictions
-    #  library(tidyverse)
-    #  library(alluvial)
-    #  library(ggalluvial)
-    crx <- testPred %>% group_by(Prior, Intermediate, Prediction) %>% tally() %>% as.data.frame()
-
-    p5 <- ggplot(crx,aes(y = n, axis1 = Prior, axis2 = Intermediate, axis3 = Prediction )) +
-      geom_alluvium(aes(fill = Prediction), width = 1/12) +
-      geom_stratum(width = 1/12, fill = "black", color = "grey") +
-      geom_label(stat = "stratum", label.strata = TRUE) +
-      scale_x_discrete(limits = c("Prior", "Int-Prediction", "Final-Prediction"), expand = c(.05, .05)) +
-      ggtitle("Predictions Cross-Check")
-
-    cowplot::save_plot(filename = paste(outputFilename,".prediction-crosscheck.pdf",sep=""),plot = p5, base_height = 16, base_width = 20)
-
-  }
-
-  if(!missing(SeuratObject)){
-
-    SeuratObject@meta.data <- SeuratObject@meta.data[,which(!colnames(SeuratObject@meta.data) %in% colnames(testPred))]
-    SeuratObject@meta.data <- cbind(SeuratObject@meta.data, testPred)
-
-    PlotPredictions(SeuratObject = SeuratObject, model = model, outputFilename = outputFilename)
-
-    return(SeuratObject)
-  }else{
-    print("Prediction output is being exported ...")
-    rownames(testPred) <- rownames(testExpSet)
-    return(testPred)
-  }#Closes missing(SeuratObj)
-}#closes the function

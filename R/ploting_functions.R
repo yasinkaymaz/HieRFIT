@@ -38,7 +38,7 @@ multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
 
 #' This function uses 'ape' package.
 #' @param tree a tree object in phylo format.
-#' @examples PlotTopo(RandTreeSim(LN = sample(5:20, 1)))
+#' @usage PlotTopo(RandTreeSim(LN = sample(5:20, 1)))
 PlotTopo <- function(tree){
   ape::plot.phylo(x = tree, direction = "downwards", show.node.label = TRUE)
   #ape::nodelabels()
