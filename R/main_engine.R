@@ -13,9 +13,10 @@ ParApp <- function() {
 #' @slot Predictors
 #' @slot Projection
 #' @slot mod.name
-CellRpred <- setClass(Class = "CellRpred",
+HieRFIT <- setClass(Class = "HieRFIT",
                       slots = c(Prior = "character",
-                               ClassProbilities = "data.frame",
+                               ClassScores = "data.frame",
+                               BackgroundScores = "data.frame",
                                Projection = "character",
                                Evaluation = "data.frame"))
 
@@ -62,12 +63,13 @@ CreateRef <- function(Ref, ClassLabels, TreeTable=NULL, method="hrf"){
 #' The main function to project reference data on query in order to identify class labels.
 #' @param Query Query data whose components will be labeled with reference data.
 #' @param refMod optional input if model exist already. Default is null and generated from scratch. Input can be an caret model object or a .Rdata file.
+#' @param Prior prior class labels if exist. For cross comparison. Should correspond row order of the Query.
 #' @param xSpecies optional argument to specify cross species information transfer. Default is null. Possible options are 'rat2mouse', 'mouse2rat', 'mouse2human', human2mouse. With respect to model data.
 #' @keywords
 #' @export
 #' @usage expRefObj <- get(load("data/exp_refObj.Rdata"))
 #' @usage cpo <- HieRFIT(Query = as.matrix(pbmc1@data), refMod = expRefobj)
-HieRFIT <- function(Query, refMod, xSpecies=NULL){
+HieRFIT <- function(Query, refMod, Prior=NULL, xSpecies=NULL){
 
   if( !is.null(xSpecies)) {
     if(xSpecies == "mouse2rat"){ ## pay attention! swapped logic.
@@ -78,23 +80,41 @@ HieRFIT <- function(Query, refMod, xSpecies=NULL){
     }
   }
 
+  #Query backround
+  colMax <- function(x) sapply(x, max, na.rm = TRUE)
+  set.seed(192939)
+  Query_bg <- Query
+  rownames(Query_bg) <- sample(rownames(Query_bg))
+
   if(refMod@modtype == "hrf"){
     nodes_P_all <- CTTraverser(Query = Query, tree = refMod@tree[[1]], hiemods = refMod@model)
     P_path_prod <- ClassProbCalculator(tree = refMod@tree[[1]], nodes_P_all = nodes_P_all)
     #Run uncertainty function
+    nodes_P_all_bg <- CTTraverser(Query = Query_bg, tree = refMod@tree[[1]], hiemods = refMod@model)
+    P_path_prod_bg <- ClassProbCalculator(tree = refMod@tree[[1]], nodes_P_all = nodes_P_all_bg)
+    bg_max <- colMax(P_path_prod_bg)
+    #P_path_prod <- P_path_prod - P_path_prod_bg
+    P_path_prod <- P_path_prod - t(as.data.frame(bg_max))[rep(1, each=nrow(P_path_prod)),]
     #exclude first column with query ids.
     Prediction <- colnames(P_path_prod)[apply(P_path_prod, 1, which.max)]
     #ScoreEvals
-    ScoreEvals <- ScoreEval(P_path_prod = P_path_prod)
+    ScoreEvals <- ScoreEval(P_path_prod = P_path_prod, bgmax = bg_max)
   }else{
     P_path_prod <- Predictor(model = refMod@model[[1]], Query = Query)
     #Run uncertainty function
+    P_path_prod_bg <- Predictor(model = refMod@model[[1]], Query = Query_bg)
+    bg_max <- colMax(P_path_prod_bg)
+    #P_path_prod <- P_path_prod - P_path_prod_bg
+    P_path_prod <- P_path_prod - t(as.data.frame(bg_max))[rep(1, each=nrow(P_path_prod)),]
+
     Prediction <- colnames(P_path_prod)[apply(P_path_prod, 1, which.max)]
     #ScoreEvals
-    ScoreEvals <- ScoreEval(P_path_prod = P_path_prod)
+    ScoreEvals <- ScoreEval(P_path_prod = P_path_prod, bgmax = bg_max)
   }
-  object <- new(Class = "CellRpred",
-                ClassProbilities = P_path_prod,
+  object <- new(Class = "HieRFIT",
+                Prior = as.character(Prior),
+                ClassScores = P_path_prod,
+                BackgroundScores = P_path_prod_bg,
                 Projection = Prediction,
                 Evaluation = ScoreEvals
                 )
@@ -102,14 +122,21 @@ HieRFIT <- function(Query, refMod, xSpecies=NULL){
   return(object)
 }
 
-ScoreEval <- function(P_path_prod){
-  #library(entropy)
 
+
+
+ScoreEval <- function(P_path_prod, bgmax){
+  library(dplyr)
   class_n <- length(colnames(P_path_prod))
-  P_path_prod$Diff <- apply(P_path_prod, 1, function(x) max(x) - sort(x, partial=length(x) - 1)[length(x) - 1])
-  P_path_prod$KLe <- apply(P_path_prod[, which(!names(P_path_prod) %in% c("Diff"))], 1, function(x) entropy::KL.empirical(y1 = as.numeric(x), y2 = rep(1/class_n, class_n)))
-  P_path_prod$BestScore <- apply(P_path_prod[, which(!names(P_path_prod) %in% c("Diff","KLe"))], 1, function(x) max(x))
   PredEval <- P_path_prod
+
+  PredEval$BestScore <- apply(P_path_prod, 1, function(x) max(x))
+  PredEval$Projection <- colnames(P_path_prod)[apply(P_path_prod, 1, which.max)]
+  PredEval <- PredEval %>% as.tibble() %>%
+    mutate(Projection = if_else( (BestScore <= 0),
+                                 "Undetermined",
+                                 as.character(Projection) )) %>% as.data.frame()
+
  return(PredEval)
 }
 
@@ -349,6 +376,20 @@ DataReshaper <- function(ExpData, Predictors, ClassLabels, alpa=0.1, ...) {
   }
 }
 
+#' This function calculates a scaled Kullback-Leibler divergence
+#' @param probs a list of observed probability scores.
+#' @return KLscaled = KLe/KLmax, where KLe is the empirical divergence given
+#' the distributions while KLmax is the maximum KLe value that can be achieved
+#' given the number of items.
+KLeCalc <- function(probs){
+  class_n <- length(probs)
+  null <- c(1, rep(0, class_n-1))
+  KLe <- entropy::KL.empirical(y1 = as.numeric(probs), y2 = rep(1/class_n, class_n))
+  KLmax <- entropy::KL.empirical(y1 = as.numeric(null), y2 = rep(1/class_n, class_n))
+  KLscaled <- KLe/KLmax
+  return(KLscaled)
+}
+
 #' The predictor function.
 #' @param model
 #' @param Query
@@ -364,6 +405,7 @@ Predictor <- function(model, Query, format="prob", node=NULL){
     if(format == "prob"){
       c_f <- length(model$levels) #correction factor; class size
       QuePred <- as.data.frame(predict(model, QueData, type = "prob"))
+      QuePred <- as.data.frame(t(apply(QuePred, 1, function(x) KLeCalc(x)*x)))
       QuePred <- QuePred*c_f
       colnames(QuePred) <- paste(node, colnames(QuePred), sep = "")
     } else {
