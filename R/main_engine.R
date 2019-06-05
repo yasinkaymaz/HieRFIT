@@ -17,7 +17,6 @@ HieRFIT <- setClass(Class = "HieRFIT",
                       slots = c(Prior = "character",
                                ClassScores = "data.frame",
                                BackgroundScores = "data.frame",
-                               Projection = "character",
                                Evaluation = "data.frame"))
 
 #' Reference class
@@ -35,17 +34,14 @@ RefMod <- setClass(Class = "RefMod",
 #' @param method The model training method, "rf" for random forest, "svmLinear" for support vector machine, "hrf" for hierarchical random forest. Default is "hrf"
 #' @param TreeFile An input file to create a hierarchical tree for relationship between class labels. Default is null but required if method 'hrf' is chosen.
 #' @usage  pbmc.refmod <- CreateRef(Ref = as.matrix(pbmc@data), ClassLabels = pbmc@meta.data$ClusterNames_0.6, TreeFile = pbmc3k_tree)
-CreateRef <- function(Ref, ClassLabels, TreeTable=NULL, method="hrf"){
+CreateHieR <- function(Ref, ClassLabels, TreeTable=NULL, method="hrf"){
 
   if(method == "hrf"){
     tree <- CreateTree(treeTable = TreeTable)
-  }
+  }else{ tree <- NULL}
 
-  #Replace white space with '_'
-  ClassLabels <- gsub(ClassLabels, pattern = " ", replacement = "_")
-  ClassLabels <- gsub(ClassLabels, pattern = "\\+|-", replacement = ".")
+  ClassLabels <- FixLab(x = ClassLabels)
 
-  print(ClassLabels)
   #Create predictive model structure. No need to create if exists.
   print("Training model... This may take some time... Please, be patient!")
   model <- Modeller(ExpData = Ref,
@@ -71,73 +67,76 @@ CreateRef <- function(Ref, ClassLabels, TreeTable=NULL, method="hrf"){
 #' @usage cpo <- HieRFIT(Query = as.matrix(pbmc1@data), refMod = expRefobj)
 HieRFIT <- function(Query, refMod, Prior=NULL, xSpecies=NULL){
 
+  if (class(Query) == "seurat" | class(Query) == "Seurat" ){
+    Query_d <- as.matrix(Query@data)}else{Query_d <- Query}
+
   if( !is.null(xSpecies)) {
     if(xSpecies == "mouse2rat"){ ## pay attention! swapped logic.
     print("Rat to mouse gene id conversion...")
-    ort <- Gmor(RatGenes = rownames(Query))
-    Query <- Query[which(rownames(Query) %in% ort$external_gene_name), ]
-    rownames(Query) <- ort[match(rownames(Query), ort$external_gene_name),]$mmusculus_homolog_associated_gene_name
+    ort <- Gmor(RatGenes = rownames(Query_d))
+    Query_d <- Query_d[which(rownames(Query_d) %in% ort$external_gene_name), ]
+    rownames(Query_d) <- ort[match(rownames(Query_d), ort$external_gene_name),]$mmusculus_homolog_associated_gene_name
     }
   }
 
   #Query backround
-  colMax <- function(x) sapply(x, max, na.rm = TRUE)
   set.seed(192939)
-  Query_bg <- Query
+  Query_bg <- Query_d
   rownames(Query_bg) <- sample(rownames(Query_bg))
 
   if(refMod@modtype == "hrf"){
-    nodes_P_all <- CTTraverser(Query = Query, tree = refMod@tree[[1]], hiemods = refMod@model)
+    # To Do: Implement parallel here as well!
+
+    nodes_P_all <- CTTraverser(Query = Query_d, tree = refMod@tree[[1]], hiemods = refMod@model)
     P_path_prod <- ClassProbCalculator(tree = refMod@tree[[1]], nodes_P_all = nodes_P_all)
     #Run uncertainty function
     nodes_P_all_bg <- CTTraverser(Query = Query_bg, tree = refMod@tree[[1]], hiemods = refMod@model)
     P_path_prod_bg <- ClassProbCalculator(tree = refMod@tree[[1]], nodes_P_all = nodes_P_all_bg)
-    bg_max <- colMax(P_path_prod_bg)
-    #P_path_prod <- P_path_prod - P_path_prod_bg
-    P_path_prod <- P_path_prod - t(as.data.frame(bg_max))[rep(1, each=nrow(P_path_prod)),]
-    #exclude first column with query ids.
-    Prediction <- colnames(P_path_prod)[apply(P_path_prod, 1, which.max)]
-    #ScoreEvals
-    ScoreEvals <- ScoreEval(P_path_prod = P_path_prod, bgmax = bg_max)
+
   }else{
-    P_path_prod <- Predictor(model = refMod@model[[1]], Query = Query)
+    P_path_prod <- Predictor(model = refMod@model[[1]], Query = Query_d)
     #Run uncertainty function
     P_path_prod_bg <- Predictor(model = refMod@model[[1]], Query = Query_bg)
-    bg_max <- colMax(P_path_prod_bg)
-    #P_path_prod <- P_path_prod - P_path_prod_bg
-    P_path_prod <- P_path_prod - t(as.data.frame(bg_max))[rep(1, each=nrow(P_path_prod)),]
-
-    Prediction <- colnames(P_path_prod)[apply(P_path_prod, 1, which.max)]
-    #ScoreEvals
-    ScoreEvals <- ScoreEval(P_path_prod = P_path_prod, bgmax = bg_max)
   }
-  object <- new(Class = "HieRFIT",
-                Prior = as.character(Prior),
-                ClassScores = P_path_prod,
-                BackgroundScores = P_path_prod_bg,
-                Projection = Prediction,
-                Evaluation = ScoreEvals
-                )
+
+  #Evaluate scores and run uncertainty function, then, project the class labels.
+  ScoreEvals <- ScoreEval(ScoreObs = P_path_prod, ScoreBg = P_path_prod_bg)
+
+  if (class(Query) == "seurat" | class(Query) == "Seurat" ){
+    Query@meta.data <- cbind(Query@meta.data[, which(!colnames(Query@meta.data) %in% colnames(ScoreEvals))],
+                             ScoreEvals)
+    object <- Query
+  }else{
+    object <- new(Class = "HieRFIT",
+                  Prior = as.character(Prior),
+                  ClassScores = P_path_prod,
+                  BackgroundScores = P_path_prod_bg,
+                  Evaluation = ScoreEvals)
+  }
 
   return(object)
 }
 
 
 
-
-ScoreEval <- function(P_path_prod, bgmax){
+#' A function for evalating the uncertainty.
+#' @param ScoreObs P_path_prod for observed scores
+#' @param ScoreBg P_path_prod_bg for background scores. Same dimensions as ScoreObs.
+ScoreEval <- function(ScoreObs, ScoreBg){
   library(dplyr)
-  class_n <- length(colnames(P_path_prod))
-  PredEval <- P_path_prod
+  colMax <- function(x) sapply(x, max, na.rm = TRUE)
+  #Substract the Background_max.i from Scores
+  bg_max <- colMax(ScoreBg)
+  ScoreObs <- ScoreObs - t(as.data.frame(bg_max))[rep(1, each=nrow(ScoreObs)), ]
 
-  PredEval$BestScore <- apply(P_path_prod, 1, function(x) max(x))
-  PredEval$Projection <- colnames(P_path_prod)[apply(P_path_prod, 1, which.max)]
-  PredEval <- PredEval %>% as.tibble() %>%
+  ScoreEval <- ScoreObs
+  ScoreEval$BestScore <- apply(ScoreObs, 1, function(x) max(x))
+  ScoreEval$Projection <- colnames(ScoreObs)[apply(ScoreObs, 1, which.max)]
+  ScoreEval <- ScoreEval %>%
     mutate(Projection = if_else( (BestScore <= 0),
                                  "Undetermined",
                                  as.character(Projection) )) %>% as.data.frame()
-
- return(PredEval)
+ return(ScoreEval)
 }
 
 #' An internal function to collect model training parameters and direct them to model creation.
@@ -202,17 +201,24 @@ RandForestWrap <- function(ExpData=ExpData, ClassLabels=ClassLabels, prefix, mod
   RefData <- DataReshaper(ExpData = ExpData,
                           Predictors = P_dicts,
                           ClassLabels = ClassLabels, ...)
-
+  print(RefData[1:5, 1:5])
   #3. Train the model.
   cl <- makePSOCKcluster(ncor)
   registerDoParallel(cl)
+  # model <- caret::train(ClassLabels~., data = RefData,
+  #                       trControl = train.control,
+  #                       method = mod.meth,
+  #                       norm.votes = TRUE,
+  #                       importance = TRUE,
+  #                       proximity = TRUE,
+  #                       #       preProcess = c("center", "scale"),
+  #                       ntree=50, ...)
   model <- caret::train(ClassLabels~., data = RefData,
-                        trControl = train.control,
                         method = mod.meth,
                         norm.votes = TRUE,
                         importance = TRUE,
                         proximity = TRUE,
-                        #       preProcess = c("center", "scale"),
+                        preProcess = c("center", "scale"),
                         ntree=50, ...)
   stopCluster(cl)
 
@@ -293,7 +299,7 @@ FeatureSelector <- function(ExpData, ClassLabels, PCs=40, num=2000, doPlots=F, p
     select_if(., is_significant) %>% colnames()
 
   print(PCs.sig)
-
+  if(length(PCs.sig) == 0){PCs.sig <- c("PC1", "PC2", "PC3")}
   load <- NULL
   topbotnames <- NULL
   TotalGenes <- 0
@@ -301,7 +307,7 @@ FeatureSelector <- function(ExpData, ClassLabels, PCs=40, num=2000, doPlots=F, p
   pb <- txtProgressBar(min = 0, max = length(PCs.sig), style = 3)
   for (i in 1:length(PCs.sig)){
     orderedpcai <- pcatrain$rotation[order(abs(pcatrain$rotation[, PCs.sig[i]]), decreasing = TRUE), PCs.sig[i]]
-    Gn <- round((PCs-i+1)*(num*2)/(PCs*(PCs+1)))
+    Gn <- round((length(PCs.sig)-i+1)*(num*2)/(length(PCs.sig)*(length(PCs.sig)+1)))
     print(Gn)
     TotalGenes <- as.numeric(TotalGenes) + Gn
     top <- data.frame(genes=names(head(orderedpcai, Gn)), bestgenes=head(orderedpcai, Gn))
@@ -323,6 +329,7 @@ FeatureSelector <- function(ExpData, ClassLabels, PCs=40, num=2000, doPlots=F, p
 
   print(paste("memory used:", pryr::mem_used()))
   bestgenes <- make.names(as.character(unique(load$genes)))
+  print(bestgenes)
   return(bestgenes)
 }
 

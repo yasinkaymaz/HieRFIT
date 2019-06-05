@@ -100,6 +100,7 @@ RandTreeSim <- function(LN=8, furcation="binary"){
   return(tree)
 }
 
+
 DigestTree <- function(tree) {
   all.nodes <- unique(tree$edge[,1])
   return(all.nodes)

@@ -1,11 +1,52 @@
 
 
 
+CVRunner <- function(Ref, ClassLabels, TreeTable=NULL, cv_k=5, method="hrf"){
+
+  # Create K-fold data split:
+  flds <- caret::createFolds(ClassLabels, k = cv_k, list = TRUE, returnTrain = FALSE)
+
+
+  hPRF_cv <- do.call(rbind.data.frame,
+                     lapply(1:cv_k,
+                            function(i){
+                              #Create hieR
+                              trainClassLabels <- ClassLabels[-flds[[1]]]
+                              trainRef <- Ref[, -flds[[1]]]
+
+                              refmod <- CreateHieR(Ref = trainRef,
+                                                   ClassLabels = trainClassLabels,
+                                                   TreeTable = TreeTable)
+
+                              #Hierfit
+                              testClassLables <- ClassLabels[flds[[1]]]
+                              testRef <- Ref[, flds[[1]]]
+
+                              testObj <- HieRFIT(Query = testRef, refMod = refmod, Prior = testClassLables)
+                              PriorPostTable <- data.frame(Prior=testObj@Prior, Projection = testObj@Evaluation$Projection)
+
+                              hPRF.out <- hPRF(tpT = PriorPostTable, tree = refmod@tree[[1]])
+                              print(hPRF.out)
+
+                              cc <- t(hPRF.out)
+                              return(cc)
+                            }
+                     )
+  )
+
+  return(hPRF_cv)
+}
+
+
+
 #' Homology mapping via orhologous genes between mouse and rat.
 Gmor <- function(RatGenes){
   # This function retrieves mouse homolog associated gene names of Rat genes.
   #library(biomaRt)
-  ensembl.rat <- biomaRt::useMart("ensembl", dataset = "rnorvegicus_gene_ensembl")
+  ensembl.rat <- biomaRt::useMart("ensembl",
+                                  dataset = "rnorvegicus_gene_ensembl",
+                                  host = "www.ensembl.org",
+                                  ensemblRedirect = FALSE)
   R2M.ort <- biomaRt::getBM(attributes = c("external_gene_name",
                                   "mmusculus_homolog_associated_gene_name",
                                   "mmusculus_homolog_orthology_confidence",
@@ -53,6 +94,41 @@ TipBias <- function(tree, confmat){
   return(err.rate)
 }
 
+#' A function to fix class labels.
+#' @param xstring is a list of class labels in character.
+FixLab <- function(xstring){
+  #Replace white space with '_'
+  xstring <- gsub(xstring, pattern = " ", replacement = "_")
+  xstring <- gsub(xstring, pattern = "\\+|-", replacement = ".")
+  return(xstring)
+}
+
+#' A function to determine the size of intersection between ancestors of True class and Predicted class
+#' @param tree tree topology in phylo format.
+#' @param t true class
+#' @param p predicted class
+IntSectSize <- function(tree, t, p){
+  Ti <- GetAncestPath(tree = tree, class = FixLab(t))
+  Pi <- GetAncestPath(tree = tree, class = FixLab(p))
+  intL <- length(intersect(Ti, Pi))
+  return(intL)
+}
+
+#' A function for Hierarchical Precision, Recall, and F-measure.
+#' @param tpT PriorPostTable: a table with two columns of which first is Prior and second is Post-prediction.
+#' @param tree tree topology in phylo format.
+hPRF <- function(tpT, tree, BetaSq=1){
+  # To Do: Consider Undetermined class!
+  tpT$Int <- apply(tpT, 1, function(x) IntSectSize(tree = tree, t = x[1], p = x[2]))
+  tpT$PiL <- apply(tpT, 1, function(x) length(GetAncestPath(tree = tree, class = FixLab(x[2]) )))
+  tpT$TiL <- apply(tpT, 1, function(x) length(GetAncestPath(tree = tree, class = FixLab(x[1]) )))
+
+  hP <- sum(tpT$Int)/sum(tpT$PiL)
+  hR <- sum(tpT$Int)/sum(tpT$TiL)
+  hF <- (BetaSq+1)*hP*hR/(BetaSq*hP+hR)
+
+  return(c(Precision=hP, Recall=hR, Fmeasure=hF))
+}
 
 #' A wrapper function for quick data processing with Seurat functions
 #' This function allows to determine highly variable genes and scale their expression,
@@ -207,3 +283,99 @@ SeuratCCAmerger <- function(listofObjects) {
   save(integrated, file="integrated.Aligned.seurat.Robj")
   return(integrated)
 }
+
+FlatRF <- function(SeuratObject, testExpSet, model, priorLabels, outputFilename="plotpredictions") {
+
+  library(caret)
+  library(randomForest)
+  library(tidyverse)
+
+  if (!missing(SeuratObject)) {
+    testExpSet <- t(as.matrix(SeuratObject@data))
+  }else{
+    print("Expression matrix is provided...")
+    testExpSet <- t(as.matrix(testExpSet))
+  }#Closes missing(SeuratObj)
+  colnames(testExpSet) <- make.names(colnames(testExpSet))
+  #Prepare Test Expression set
+  testsub <- testExpSet[,which(colnames(testExpSet) %in% model$finalModel$xNames)]
+  missingGenes <- model$finalModel$xNames[which(!model$finalModel$xNames %in% colnames(testExpSet))]
+  print(model$finalModel$importance[missingGenes,])
+
+  missingGenes.df <- data.frame(matrix(0, ncol = length(missingGenes), nrow = length(rownames(testExpSet))))
+  colnames(missingGenes.df) <- missingGenes
+  TestData <- cbind(testsub, missingGenes.df)
+  TestData <- TestData[,model$finalModel$xNames]
+  mmDGm <- mean(model$finalModel$importance[missingGenes,])
+  mmDGf <- mean(model$finalModel$importance[which(!model$finalModel$xNames %in% missingGenes),])
+
+  cat("Number of Features (genes) to be considered is", length(colnames(testsub)), '\n',
+      "Number of missing Features set to zero is", length(missingGenes), '\n',
+      "Mean MeanDecreaseGini of missing genes is", mmDGm, '\n',
+      "Mean MeanDecreaseGini of Featured genes is", mmDGf, '\n',
+      sep = ' ')
+
+  if (!is.nan(mmDGm)) {
+    if ((mmDGm > mmDGf)|(length(colnames(testsub)) < length(missingGenes) )) {
+      warning("A significant portion of features are missing...")
+    }
+  }
+
+
+  rm(testsub, missingGenes, missingGenes.df)
+  gc()
+  #Predict
+  library(entropy)
+  testPred <- as.data.frame(predict(model, TestData, type = "prob"))
+  class.n <- length(model$finalModel$classes)
+  testPred$Diff <- apply(testPred, 1, function(x) max(x)-sort(x,partial=length(x)-1)[length(x)-1])
+  testPred$KLe <- apply(testPred[,which(!names(testPred) %in% c("Diff"))], 1, function(x) KL.empirical(y1 = as.numeric(x), y2 = rep(1/class.n, class.n)) )
+  testPred$BestVotesPercent <- apply(testPred[,which(!names(testPred) %in% c("Diff","KLe"))],1, function(x) max(x)  )
+  testPred$Prediction <- predict(model, TestData, type="raw")
+  #Flag cell type prediction if Kullback-Leibler divergence value is higher than 0.5 OR the difference between the highest and the second highest percent vote (Diff) is higher than two time of random vote rate (2/class.n)
+  testPred <- testPred %>% as.tibble() %>% mutate(Intermediate = Prediction ) %>% as.data.frame()
+  testPred <- testPred %>% as.tibble() %>% mutate(Prediction = if_else( (KLe <= 0.25) | (Diff <= 2/class.n), "Undetermined", as.character(Prediction) )) %>% as.data.frame()
+  testPred <- testPred %>% as.tibble() %>% mutate(PredictionStatus = if_else( (KLe <= 0.25) | (Diff <= 2/class.n), "Undetermined", "Detected")) %>% as.data.frame()
+  #testPred <- testPred %>% as.tibble() %>% mutate(Prediction = ifelse( (KLe <= 0.5) | (Diff <= 2/class.n), "Unclassified", as.character(Prediction) )) %>% as.data.frame()
+
+  if (missing(priorLabels)) {
+    print("Prior class labels are not provided!")
+
+  }else{
+    #Provided prior class labels (priorLabels) has to be a dataframe with same rownames as input testExpSet with one column storing labels.
+    priorLabels <- as.data.frame(priorLabels)
+    colnames(priorLabels) <- c("Prior")
+    testPred <- cbind(testPred, priorLabels)
+
+    #Plot the crosscheck here:
+    #Crosscheck Predictions
+    library(tidyverse)
+    library(alluvial)
+    library(ggalluvial)
+    crx <- testPred %>% group_by(Prior, Intermediate, Prediction) %>% tally() %>% as.data.frame()
+
+    p5 <- ggplot(crx,aes(y = n, axis1 = Prior, axis2 = Intermediate, axis3 = Prediction )) +
+      geom_alluvium(aes(fill = Prediction), width = 1/12) +
+      geom_stratum(width = 1/12, fill = "black", color = "grey") +
+      geom_label(stat = "stratum", label.strata = TRUE) +
+      scale_x_discrete(limits = c("Prior", "Clusters", "Int-Prediction", "Final-Prediction"), expand = c(.05, .05)) +
+      ggtitle("Predictions Cross-Check")
+
+    save_plot(filename = paste(outputFilename,".prediction-crosscheck.pdf",sep=""),plot = p5, base_height = 1.2*class.n, base_width = 1.2*class.n)
+  }
+
+  if (!missing(SeuratObject)) {
+    #update predictions in the meta.data slot
+    SeuratObject@meta.data <- SeuratObject@meta.data[,which(!colnames(SeuratObject@meta.data) %in% colnames(testPred))]
+    SeuratObject@meta.data <- cbind(SeuratObject@meta.data, testPred)
+
+    return(SeuratObject)
+
+  }else{
+    print("Prediction output is being exported ...")
+    rownames(testPred) <- rownames(testExpSet)
+    return(testPred)
+  }#Closes missing(SeuratObj)
+}#closes the function
+
+

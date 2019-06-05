@@ -1,1 +1,6 @@
 exportPattern("^[[:alpha:]]+")
+importFrom("grDevices", "dev.off", "pdf")
+importFrom("graphics", "plot")
+importFrom("methods", "new")
+importFrom("stats", "prcomp", "predict", "reorder", "var")
+importFrom("utils", "head", "setTxtProgressBar", "txtProgressBar")

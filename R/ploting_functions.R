@@ -39,7 +39,7 @@ multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
 #' This function uses 'ape' package.
 #' @param tree a tree object in phylo format.
 #' @usage PlotTopo(RandTreeSim(LN = sample(5:20, 1)))
-PlotTopo <- function(tree){
+PlotTopo <- function(tree){### Update with data.tree plotting
   ape::plot.phylo(x = tree, direction = "downwards", show.node.label = TRUE)
   #ape::nodelabels()
 }
@@ -186,7 +186,7 @@ PlotPredictions22 <- function(SeuratObject, outputFilename="plotpredictions") {
 
 }
 
-CrossCheck <- function(PriorPostTable,outputprefix=""){
+CrossCheck <- function(PriorPostTable, outputprefix=""){
   #This function takes a table with two columns of which first is for prior cell labels and second is for predicted cell class.
   library(tidyverse)
   library(alluvial)
@@ -200,10 +200,10 @@ CrossCheck <- function(PriorPostTable,outputprefix=""){
     geom_label(stat = "stratum", label.strata = TRUE) +
     scale_x_discrete(limits = c("PriorLabels","FinalPrediction"), expand = c(.05, .05)) +
     ggtitle("Predictions Cross-Check")
-  pdf(paste(outputprefix,".prediction-crosscheck.pdf",sep=""),width = 20,height = 15)
-  print(p5)
-  dev.off()
-
+  #pdf(paste(outputprefix,".prediction-crosscheck.pdf",sep=""),width = 20,height = 15)
+  #print(p5)
+  #dev.off()
+  return(p5)
 }
 
 PlotClusterTree <- function(object, ...) {

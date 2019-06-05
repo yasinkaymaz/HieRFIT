@@ -10,6 +10,7 @@ License: Licenced under GNU General Public License v3.0.
 Encoding: UTF-8
 LazyData: true
 Imports:
+    methods,
     Matrix,
     ape,
     data.tree,

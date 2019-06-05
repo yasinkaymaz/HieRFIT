@@ -1,7 +1,7 @@
 # HieRFIT
 ## Hierarchical Random Forest for Information Transfer
 
-![](extra/HieRFIT_banner.jpg)
+![](data/extra/HieRFIT_banner.jpg)
 
 Increasing demand for data integration and cross-comparison in bioinformatics drive the need for new methods. One of the applications of this R package is determining major cell types of samples in the single cell RNAseq (scRNAseq) datasets. Common methods for deciding type of the cells often involve manually checking known tissue/cell specific gene expression levels. Sensitive methods for automatically determining cell types is currently lacking. Therefore, our effort is to develop a machine learning approach to predict cell labels using gene expression levels from scRNAseq datasets. This will allow researchers to find out existing cell types in their experimental outcomes and use these predictions to further fine tune their data for downstream analysis, such as marker gene selection, differential expression test, etc.
 
