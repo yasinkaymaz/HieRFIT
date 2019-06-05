@@ -46,7 +46,7 @@ PlotTopo <- function(tree){### Update with data.tree plotting
 
 PlotPredictions <- function(SeuratObject, model, save.pdf=T, outputFilename="plotpredictions") {
   #Evaluate model prediction accuracy:
-  conf.mat <- model$confusion %>% as.data.frame() %>% select(-class.error)
+  conf.mat <- model$confusion %>% as.data.frame() %>% dplyr::select(-class.error)
   conf.mat <- reshape2::melt(as.matrix(conf.mat)) %>% as.tibble() %>% group_by(Var1) %>%
     mutate(freq = 100*value/sum(value))
 
@@ -110,7 +110,7 @@ PlotPredictions <- function(SeuratObject, model, save.pdf=T, outputFilename="plo
 
 PlotPredictions2 <- function(SeuratObject, model, priorLabels, outputFilename="plotpredictions") {
   #Evaluate model prediction accuracy:
-  conf.mat <- model$finalModel$confusion %>% as.data.frame() %>% select(-class.error)
+  conf.mat <- model$finalModel$confusion %>% as.data.frame() %>% dplyr::select(-class.error)
   conf.mat <- reshape2::melt(as.matrix(conf.mat)) %>% as.tibble() %>% group_by(Var1) %>% mutate(freq = 100*value/sum(value))
   class.n = length(model$finalModel$classes)
   errorSize <- as.data.frame(cbind(model$finalModel$confusion[,"class.error"], head(colSums(model$finalModel$confusion),-1)))

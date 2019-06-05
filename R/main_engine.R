@@ -287,14 +287,14 @@ FeatureSelector <- function(ExpData, ClassLabels, PCs=40, num=2000, doPlots=F, p
 
   #Create a table for evaluation of all PCs with a significance test.
   PCs.sig.table <- pcadata %>% group_by(ClassLabels) %>%
-    select(paste("PC", 1, sep = ""):paste("PC", PCs, sep = "")) %>%
+    dplyr::select(paste("PC", 1, sep = ""):paste("PC", PCs, sep = "")) %>%
     summarize_all(list(~t.test(x = .)$p.value)) %>%
     as.data.frame()
   rownames(PCs.sig.table) <- PCs.sig.table$ClassLabels
   PCs.sig.table <- PCs.sig.table[, -c(1)]
 
   PCs.sig <- pcadata %>% group_by(ClassLabels) %>%
-    select(paste("PC", 1, sep = ""):paste("PC", PCs, sep = "")) %>%
+    dplyr::select(paste("PC", 1, sep = ""):paste("PC", PCs, sep = "")) %>%
     summarize_all(list(~t.test(x = .)$p.value)) %>%
     select_if(., is_significant) %>% colnames()
 
