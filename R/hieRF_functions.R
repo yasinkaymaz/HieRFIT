@@ -25,7 +25,7 @@ HieRandForest <- function(ExpData=ExpData, ClassLabels=ClassLabels, tree, thread
     registerDoParallel(cl)
     print(paste("registered cores is", getDoParWorkers(), sep = " "))
 
-    out <- foreach(i=node.list, .packages = c('ggplot2'), .inorder = TRUE) %dopar% {
+    out <- foreach(i=node.list, .packages = c('HieRFIT'), .inorder = TRUE) %dopar% {
       NodeTrainer(Tdata = Tdata, tree = tree, node = i)
     }
     stopCluster(cl)
