@@ -29,7 +29,6 @@ HieRandForest <- function(ExpData=ExpData, ClassLabels=ClassLabels, tree, thread
 
       .libPaths("~/biotools/Rlibs")
       library(R6)
-      library(tidyverse)
       source("~/codes/HieRFIT/R/hieRF_functions.R")
       source("~/codes/HieRFIT/R/main_engine.R")
       source("~/codes/HieRFIT/R/ploting_functions.R")
