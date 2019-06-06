@@ -16,7 +16,8 @@ CVRunner <- function(Ref, ClassLabels, TreeTable=NULL, cv_k=5, method="hrf"){
 
                               refmod <- CreateHieR(Ref = trainRef,
                                                    ClassLabels = trainClassLabels,
-                                                   TreeTable = TreeTable)
+                                                   TreeTable = TreeTable,
+                                                   thread=12)
 
                               #Hierfit
                               testClassLables <- ClassLabels[flds[[1]]]

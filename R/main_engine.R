@@ -34,7 +34,7 @@ RefMod <- setClass(Class = "RefMod",
 #' @param method The model training method, "rf" for random forest, "svmLinear" for support vector machine, "hrf" for hierarchical random forest. Default is "hrf"
 #' @param TreeFile An input file to create a hierarchical tree for relationship between class labels. Default is null but required if method 'hrf' is chosen.
 #' @usage  pbmc.refmod <- CreateRef(Ref = as.matrix(pbmc@data), ClassLabels = pbmc@meta.data$ClusterNames_0.6, TreeFile = pbmc3k_tree)
-CreateHieR <- function(Ref, ClassLabels, TreeTable=NULL, method="hrf"){
+CreateHieR <- function(Ref, ClassLabels, TreeTable=NULL, method="hrf", thread=NULL){
 
   if(method == "hrf"){
     tree <- CreateTree(treeTable = TreeTable)
@@ -47,6 +47,7 @@ CreateHieR <- function(Ref, ClassLabels, TreeTable=NULL, method="hrf"){
   model <- Modeller(ExpData = Ref,
                     ClassLabels = ClassLabels,
                     mod.meth = method,
+                    thread = thread,
                     tree = tree)
   refObj <- new(Class = "RefMod",
                 model = model,
