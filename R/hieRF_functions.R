@@ -26,14 +26,6 @@ HieRandForest <- function(ExpData=ExpData, ClassLabels=ClassLabels, tree, thread
     print(paste("registered cores is", getDoParWorkers(), sep = " "))
 
     out <- foreach(i=node.list, .packages = c('ggplot2'), .inorder = TRUE) %dopar% {
-
-      .libPaths("~/biotools/Rlibs")
-      library(R6)
-      source("~/codes/HieRFIT/R/hieRF_functions.R")
-      source("~/codes/HieRFIT/R/main_engine.R")
-      source("~/codes/HieRFIT/R/ploting_functions.R")
-      source("~/codes/HieRFIT/R/utilities.R")
-
       NodeTrainer(Tdata = Tdata, tree = tree, node = i)
     }
     stopCluster(cl)

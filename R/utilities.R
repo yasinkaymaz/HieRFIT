@@ -37,7 +37,13 @@ CVRunner <- function(Ref, ClassLabels, TreeTable=NULL, cv_k=5, method="hrf"){
   return(hPRF_cv)
 }
 
-
+RandomizeR <- function(df){
+  set.seed(192939)
+  dfR <- df[sample(nrow(df)), sample(ncol(df))]
+  rownames(dfR) <- rownames(df)
+  colnames(dfR) <- colnames(df)
+  return(dfR)
+}
 
 #' Homology mapping via orhologous genes between mouse and rat.
 Gmor <- function(RatGenes){

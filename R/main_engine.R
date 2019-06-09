@@ -53,6 +53,8 @@ CreateHieR <- function(Ref, ClassLabels, TreeTable=NULL, method="hrf", thread=NU
                 model = model,
                 modtype = method)
   refObj@tree[[1]] <- tree
+
+  #foreach::registerDoSEQ()
   #Return a Ref object rather than single model.
   return(refObj)
 }
@@ -81,9 +83,7 @@ HieRFIT <- function(Query, refMod, Prior=NULL, xSpecies=NULL){
   }
 
   #Query backround
-  set.seed(192939)
-  Query_bg <- Query_d
-  rownames(Query_bg) <- sample(rownames(Query_bg))
+  Query_bg <- RandomizeR(Query_d)
 
   if(refMod@modtype == "hrf"){
     # To Do: Implement parallel here as well!
@@ -206,21 +206,13 @@ RandForestWrap <- function(ExpData=ExpData, ClassLabels=ClassLabels, prefix, mod
   #3. Train the model.
   cl <- makePSOCKcluster(ncor)
   registerDoParallel(cl)
-  # model <- caret::train(ClassLabels~., data = RefData,
-  #                       trControl = train.control,
-  #                       method = mod.meth,
-  #                       norm.votes = TRUE,
-  #                       importance = TRUE,
-  #                       proximity = TRUE,
-  #                       #       preProcess = c("center", "scale"),
-  #                       ntree=50, ...)
   model <- caret::train(ClassLabels~., data = RefData,
                         method = mod.meth,
                         norm.votes = TRUE,
                         importance = TRUE,
                         proximity = TRUE,
                         preProcess = c("center", "scale"),
-                        ntree=50, ...)
+                        ntree=500, ...)
   stopCluster(cl)
 
   return(model)
@@ -253,7 +245,7 @@ SvmWrap <- function(ExpData=ExpData, ClassLabels=ClassLabels, prefix, mod.meth, 
                         norm.votes = TRUE,
                         importance = TRUE,
                         proximity = TRUE,
-                        #       preProcess = c("center", "scale"),
+                        preProcess = c("center", "scale"),
                         tuneLength = 10, ...)
   stopCluster(cl)
 
@@ -413,8 +405,8 @@ Predictor <- function(model, Query, format="prob", node=NULL){
     if(format == "prob"){
       c_f <- length(model$levels) #correction factor; class size
       QuePred <- as.data.frame(predict(model, QueData, type = "prob"))
-      QuePred <- as.data.frame(t(apply(QuePred, 1, function(x) KLeCalc(x)*x)))
-      QuePred <- QuePred*c_f
+#      QuePred <- as.data.frame(t(apply(QuePred, 1, function(x) KLeCalc(x)*x)))
+#      QuePred <- QuePred*c_f
       colnames(QuePred) <- paste(node, colnames(QuePred), sep = "")
     } else {
       QuePred <- as.data.frame(predict(model, QueData, type = "raw"))

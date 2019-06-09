@@ -44,6 +44,28 @@ PlotTopo <- function(tree){### Update with data.tree plotting
   #ape::nodelabels()
 }
 
+PlotProjectionStats <- function(SeuratObject, outputFilename="plotpredictions") {
+  pdf(paste(outputFilename,".pdf",sep=""),width= 12, height = 8)
+
+  TSNEPlot(SeuratObject)
+
+  TSNEPlot(SeuratObject, group="Projection", do.label = T)
+
+  p <- ggplot(data=SeuratObject@meta.data)+
+    geom_histogram(aes(x=Projection,fill=Projection),stat = "count")+
+    theme(axis.text.x = element_text(angle = 90, hjust = 1),legend.position="right")+
+    labs(y="Number of Cells (bars)",title=paste("Projection outcome", sep=""))
+  print(p)
+
+  p <- ggplot(data=SeuratObject@meta.data)+
+    geom_boxplot(aes(x=Projection,y=BestScore,fill=Projection))+
+    theme(axis.text.x = element_text(angle = 90, hjust = 1),legend.position="right")+
+    labs(y="Classification Score - max(Sij(x))",title=paste("Prediction outcome", sep=""))
+  print(p)
+
+  dev.off()
+}
+
 PlotPredictions <- function(SeuratObject, model, save.pdf=T, outputFilename="plotpredictions") {
   #Evaluate model prediction accuracy:
   conf.mat <- model$confusion %>% as.data.frame() %>% dplyr::select(-class.error)

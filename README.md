@@ -55,7 +55,7 @@ Then, create the reference model using the cell class labels. Here, we can use a
 ```{r}
 library(HieRFIT)
 
-refmod <- CreateRef(Ref = as.matrix(pbmc@data),
+refmod <- CreateHieR(Ref = as.matrix(pbmc@data),
                           ClassLabels = pbmc@meta.data$ClusterNames_0.6,
                           TreeTable = treeTable)
 
@@ -65,6 +65,16 @@ ProObj <- HieRFIT(Query = as.matrix(newPBMC@data), refMod = refmod)
 newPBMC@meta.data$ProjectedCellTypes <- ProObj@Projection
 
 ```
+Alternatively, you can directly update the Seurat object:
+
+```{r}
+#Project the cell class labels on the new dataset:
+newPBMC <- HieRFIT(Query = newPBMC, refMod = refmod)
+
+head(newPBMC@meta.data)
+
+```
+meta.data slot of the object will carry all class probailities as well as the final cell type prediction column, "Projection".
 
 ### How it works:
 
