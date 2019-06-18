@@ -150,7 +150,7 @@ ScoreEval <- function(ScoreObs, ScoreBg){
 #' @keywords
 #' @export
 #' @usage rf.model <- Modeller(ExpData = as.matrix(pbmc1@data), ClassLabels = pbmc1@meta.data$ClusterNames_0.6)
-Modeller <- function(ExpData, ClassLabels=NULL, mod.meth="rf", cv.k=5, thread=NULL, tree=NULL, save.int.f=FALSE, ...){
+Modeller <- function(ExpData, ClassLabels=NULL, mod.meth="rf", cv.k=2, thread=NULL, tree=NULL, save.int.f=FALSE, ...){
   prefix=paste(cv.k, "K-fold", mod.meth, sep=".")
   #k-fold Cross Validation
   train.control <- caret::trainControl(method="cv",
@@ -181,7 +181,7 @@ Modeller <- function(ExpData, ClassLabels=NULL, mod.meth="rf", cv.k=5, thread=NU
                            ClassLabels = ClassLabels,
                            tree, thread = thread) # For now.
   }
-  save(model, file=paste(prefix,"model.Robj",sep = "."))
+  #save(model, file=paste(prefix,"model.Robj",sep = "."))
   return(model)
 }
 
@@ -212,7 +212,12 @@ RandForestWrap <- function(ExpData=ExpData, ClassLabels=ClassLabels, prefix, mod
                         importance = TRUE,
                         proximity = TRUE,
                         preProcess = c("center", "scale"),
-                        ntree=500, ...)
+                        ntree=50,
+                        #sampsize=rep(1,length(unique(ClassLabels))),
+                        #strata= RefData$ClassLabels,
+                        #classwt=table(ClassLabels)/sum(table(ClassLabels)),
+                        #trControl = train.control,
+                        ...)
   stopCluster(cl)
 
   return(model)
@@ -305,6 +310,7 @@ FeatureSelector <- function(ExpData, ClassLabels, PCs=40, num=2000, doPlots=F, p
     TotalGenes <- as.numeric(TotalGenes) + Gn
     top <- data.frame(genes=names(head(orderedpcai, Gn)), bestgenes=head(orderedpcai, Gn))
     load <- rbind(load, top)
+    print(top)
     setTxtProgressBar(pb, i+1)
     pc.p <- ggplot(pcadata, aes_string(x=PCs.sig[i], y="ClassLabels", color="ClassLabels"))+geom_point()
     plots[[i]] <- pc.p
@@ -371,6 +377,7 @@ DataReshaper <- function(ExpData, Predictors, ClassLabels, alpa=0.1, ...) {
     RefData[indx] <- lapply(RefData[indx], function(x) as.numeric(as.character(x)))
     RefData$ClassLabels <- factor(make.names(ClassLabels))
     RefData <- droplevels(RefData[, c(Predictors, "ClassLabels")])
+
     return(RefData)
     }
   }
@@ -400,16 +407,16 @@ Predictor <- function(model, Query, format="prob", node=NULL){
   QueData <- DataReshaper(ExpData = Query, Predictors = P_dicts)
 
   if(is.null(node)){
-    QuePred <- as.data.frame(predict(model, QueData, type = "prob"))
+    QuePred <- as.data.frame(predict(model, QueData, type = "prob", scale=T, center=T))
   } else{
     if(format == "prob"){
       c_f <- length(model$levels) #correction factor; class size
-      QuePred <- as.data.frame(predict(model, QueData, type = "prob"))
+      QuePred <- as.data.frame(predict(model, QueData, type = "prob", scale=T, center=T))
 #      QuePred <- as.data.frame(t(apply(QuePred, 1, function(x) KLeCalc(x)*x)))
 #      QuePred <- QuePred*c_f
       colnames(QuePred) <- paste(node, colnames(QuePred), sep = "")
     } else {
-      QuePred <- as.data.frame(predict(model, QueData, type = "raw"))
+      QuePred <- as.data.frame(predict(model, QueData, type = "raw", scale=T, center=T))
       colnames(QuePred) <- as.character(node)
     }
   }

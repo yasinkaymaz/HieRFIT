@@ -1,12 +1,30 @@
 
 
+#' A function to calculate Asymmetric Entropy
+#' @param p measured probability array
+#' @param w empirically calculated W set
+#' @return U set of certainty values for each probility outcome in p given w.
+GetCertaintyArray <- function(p, w){
+  U <- numeric()
+  for(i in 1:length(p)){
+    w[i] <- w[i]+1e-10#to prevent math err.
+    if(p[i] > w[i]){
+      Beta=1
+    }else{
+        Beta=-1
+        }
+    #H <- c(H, ((p[i]*(1-p[i])) / (p[i]-2*w[i]*p[i]+w[i]^2)))
+    #U <- c(U, (Beta*(p[i]-w[i])*(p[i]+w[i]))/( ((1-2*w[i])*p[i])+w[i]^2 ) )
+    U <- c(U, Beta*( 1 - ( (p[i]*(1-p[i])) / (p[i]-2*w[i]*p[i]+w[i]^2)  ) )  )
+  }
+  U <- as.numeric(U)
+  return(U)
+}
 
 CVRunner <- function(Ref, ClassLabels, TreeTable=NULL, cv_k=5, method="hrf"){
 
   # Create K-fold data split:
   flds <- caret::createFolds(ClassLabels, k = cv_k, list = TRUE, returnTrain = FALSE)
-
-
   hPRF_cv <- do.call(rbind.data.frame,
                      lapply(1:cv_k,
                             function(i){
@@ -21,36 +39,32 @@ CVRunner <- function(Ref, ClassLabels, TreeTable=NULL, cv_k=5, method="hrf"){
                               #Hierfit
                               testClassLables <- ClassLabels[flds[[1]]]
                               testRef <- Ref[, flds[[1]]]
-
                               testObj <- HieRFIT(Query = testRef, refMod = refmod, Prior = testClassLables)
                               PriorPostTable <- data.frame(Prior=testObj@Prior, Projection = testObj@Evaluation$Projection)
-
                               hPRF.out <- hPRF(tpT = PriorPostTable, tree = refmod@tree[[1]])
                               print(hPRF.out)
-
                               cc <- t(hPRF.out)
                               return(cc)
                             }
                      )
   )
-
   return(hPRF_cv)
 }
 
 RandomizeR <- function(df){
-  set.seed(192939)
+  #set.seed(192939)
   dfR <- df[sample(nrow(df)), sample(ncol(df))]
   rownames(dfR) <- rownames(df)
   colnames(dfR) <- colnames(df)
   return(dfR)
 }
 
+
 #' Homology mapping via orhologous genes between mouse and rat.
 Gmor <- function(RatGenes){
   # This function retrieves mouse homolog associated gene names of Rat genes.
   #library(biomaRt)
-  ensembl.rat <- biomaRt::useMart("ensembl",
-                                  dataset = "rnorvegicus_gene_ensembl",
+  ensembl.rat <- biomaRt::useMart("ensembl", dataset = "rnorvegicus_gene_ensembl",
                                   host = "www.ensembl.org",
                                   ensemblRedirect = FALSE)
   R2M.ort <- biomaRt::getBM(attributes = c("external_gene_name",
@@ -110,12 +124,11 @@ FixLab <- function(xstring){
 }
 
 #' A function to determine the size of intersection between ancestors of True class and Predicted class
-#' @param tree tree topology in phylo format.
 #' @param t true class
 #' @param p predicted class
-IntSectSize <- function(tree, t, p){
-  Ti <- GetAncestPath(tree = tree, class = FixLab(t))
-  Pi <- GetAncestPath(tree = tree, class = FixLab(p))
+IntSectSize <- function(t, p){
+  Ti <- GetAncestPath(tree = tt, class = FixLab(t))
+  Pi <- GetAncestPath(tree = tt, class = FixLab(p))
   intL <- length(intersect(Ti, Pi))
   return(intL)
 }
@@ -125,7 +138,7 @@ IntSectSize <- function(tree, t, p){
 #' @param tree tree topology in phylo format.
 hPRF <- function(tpT, tree, BetaSq=1){
   # To Do: Consider Undetermined class!
-  tpT$Int <- apply(tpT, 1, function(x) IntSectSize(tree = tree, t = x[1], p = x[2]))
+  tpT$Int <- apply(tpT, 1, function(x) IntSectSize(t = x[1], p = x[2]))
   tpT$PiL <- apply(tpT, 1, function(x) length(GetAncestPath(tree = tree, class = FixLab(x[2]) )))
   tpT$TiL <- apply(tpT, 1, function(x) length(GetAncestPath(tree = tree, class = FixLab(x[1]) )))
 
@@ -195,6 +208,29 @@ DownSizeSeurat <- function(SeuratObj, IdentityCol, min_n=NULL){
   return(downSobj)
 }
 
+#' A function to downsample a refdata table based on classLabels
+#' @param RefData a data table with features as columns (last column being ClassLabels), instances in the rows.
+#' @param IdentityCol the name of the column in the refdata storing class labels. default is "ClassLabels"
+#' @param min_n min number of samples to downsample each class. default is the size of the minority class.
+#' @usage RefData_d <- DownSampleRef(RefData = RefData)
+DownSampleRef <- function(RefData, IdentityCol="ClassLabels", min_n=NULL){
+  samples <- NULL
+  classes <- table(RefData[, IdentityCol])
+  print(classes)
+  if(is.null(min_n)){
+    min_n <- min(classes)
+    print(min_n)
+  }
+  for(type in names(classes)){
+    if( classes[type] > min_n ){
+      samples <- c(samples, sample(rownames(RefData[which(RefData[, IdentityCol] == type), ]), size = min_n, replace = F))
+    }else{
+      samples <- c(samples, sample(rownames(RefData[which(RefData[, IdentityCol] == type), ]), size = min_n, replace = T))
+    }
+  }
+  RefData_d <- RefData[samples, ]
+  return(RefData_d)
+}
 SeuratWrapper <- function(ExpData, ProjectLabel, NewMeta, Normalize=T, suppressLog=F, scale.only.var=T, PCs=20, perp=30, dump.files=F, min.cells=0, min.genes=0) {
 
   if (Normalize == TRUE) {print("Assuming the input is in count ...")

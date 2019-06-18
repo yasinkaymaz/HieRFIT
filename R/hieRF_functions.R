@@ -179,6 +179,9 @@ SubsetTData <- function(Tdata, tree, node){
     #Combine with all other child node data
     SubTdata <- rbind(SubTdata, Subdata)
   }
+  #Here balance the class sizes with median:
+  #SubTdata <- DownSampleRef(RefData = SubTdata, min_n = round(median(table(SubTdata$ClassLabels))))
+
   return(t(SubTdata))
 }
 
