@@ -14,7 +14,7 @@ GetCertaintyArray <- function(p, w){
         Beta=-1
         }
     #H <- c(H, ((p[i]*(1-p[i])) / (p[i]-2*w[i]*p[i]+w[i]^2)))
-    #U <- c(U, (Beta*(p[i]-w[i])*(p[i]+w[i]))/( ((1-2*w[i])*p[i])+w[i]^2 ) )
+    #U <- c(U, (Beta*(p[i]-w[i])^2)/( ((1-2*w[i])*p[i])+w[i]^2 ) )
     U <- c(U, Beta*( 1 - ( (p[i]*(1-p[i])) / (p[i]-2*w[i]*p[i]+w[i]^2)  ) )  )
   }
   U <- as.numeric(U)
@@ -42,6 +42,9 @@ CVRunner <- function(Ref, ClassLabels, TreeTable=NULL, cv_k=5, method="hrf"){
                               testObj <- HieRFIT(Query = testRef, refMod = refmod, Prior = testClassLables)
                               PriorPostTable <- data.frame(Prior=testObj@Prior, Projection = testObj@Evaluation$Projection)
                               hPRF.out <- hPRF(tpT = PriorPostTable, tree = refmod@tree[[1]])
+                              hPRF.out <- c(CV_k=i,
+                                            hPRF.out,
+                                            Undetermined=nrow(PriorPostTable[PriorPostTable$Projection == "Undetermined",])/length(PriorPostTable[,1]))
                               print(hPRF.out)
                               cc <- t(hPRF.out)
                               return(cc)
@@ -50,6 +53,39 @@ CVRunner <- function(Ref, ClassLabels, TreeTable=NULL, cv_k=5, method="hrf"){
   )
   return(hPRF_cv)
 }
+
+
+#' A function to evaluate performance of HieRFIT with various Certainty thresholds.
+#' @param RefSeuObj reference seurat object.
+#' @param IdentityCol the column 'number' in the metadata slot showing the cell type identities.
+#' @param RefMod
+#' @param Uinter number of intervals to assess certainty threshold.
+#' @param perm_n # of permutations.
+#' @param samp_n # samples to draw at each permutation.
+EvaluateCertainty <- function(RefSeuObj, IdentityCol, RefMod, Uinter=20, perm_n=10, samp_n=100){
+  hPRF_table <- numeric()
+  for(p in 1:perm_n){
+    testcells <- sample(rownames(RefSeuObj@meta.data), samp_n)
+    for( ai in seq(1:Uinter)/Uinter){
+      testObj <- HieRFIT(Query = as.matrix(RefSeuObj@data)[, testcells],
+                         refMod = RefMod,
+                         Prior = RefSeuObj@meta.data[testcells, IdentityCol],
+                         alpha = ai)
+      print(RefSeuObj@meta.data[testcells, ]$ColClassLabs)
+      PriorPostTable <- data.frame(Prior = testObj@Prior,
+                                   Projection = testObj@Evaluation$Projection)
+      hPRF.out <- hPRF(tpT = PriorPostTable, tree = RefMod@tree[[1]])
+      hPRF.out <- c(Perm=p,
+                    U_threshold=ai,
+                    hPRF.out,
+                    Undetermined=nrow(PriorPostTable[PriorPostTable$Projection == "Undetermined",])/length(PriorPostTable[,1]))
+      print(hPRF.out)
+      hPRF_table <- rbind(hPRF_table, hPRF.out)
+    }
+  }
+  return(hPRF_table)
+}
+
 
 RandomizeR <- function(df){
   #set.seed(192939)
@@ -126,9 +162,9 @@ FixLab <- function(xstring){
 #' A function to determine the size of intersection between ancestors of True class and Predicted class
 #' @param t true class
 #' @param p predicted class
-IntSectSize <- function(t, p){
-  Ti <- GetAncestPath(tree = tt, class = FixLab(t))
-  Pi <- GetAncestPath(tree = tt, class = FixLab(p))
+IntSectSize <- function(t, p, tree){
+  Ti <- GetAncestPath(tree = tree, class = FixLab(t))
+  Pi <- GetAncestPath(tree = tree, class = FixLab(p))
   intL <- length(intersect(Ti, Pi))
   return(intL)
 }
@@ -138,7 +174,7 @@ IntSectSize <- function(t, p){
 #' @param tree tree topology in phylo format.
 hPRF <- function(tpT, tree, BetaSq=1){
   # To Do: Consider Undetermined class!
-  tpT$Int <- apply(tpT, 1, function(x) IntSectSize(t = x[1], p = x[2]))
+  tpT$Int <- apply(tpT, 1, function(x) IntSectSize(t = x[1], p = x[2], tree = tree))
   tpT$PiL <- apply(tpT, 1, function(x) length(GetAncestPath(tree = tree, class = FixLab(x[2]) )))
   tpT$TiL <- apply(tpT, 1, function(x) length(GetAncestPath(tree = tree, class = FixLab(x[1]) )))
 

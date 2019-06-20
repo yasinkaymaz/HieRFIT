@@ -50,25 +50,51 @@ CTTraverser <- function(Query, tree, hiemods, thread=NULL){
   library(doParallel)
   node.list <- DigestTree(tree = tree)
   #Create a table for storing node probabilities.
-  ProbTab <- data.frame(Queries = colnames(Query))
+  Scores <- data.frame(row.names = colnames(Query))
+  Pvotes <- data.frame(row.names = colnames(Query))
+  QueWs <- data.frame(row.names = colnames(Query))
+  QueCers <- data.frame(row.names = colnames(Query))
 
   if(is.null(thread)){
-    #Build a local classifier for each node in the tree. Binary or multi-class mixed.
+    #
     for(i in node.list){
-      nodeProb <- Predictor(model = hiemods[[as.character(i)]][[1]],
+      nodeModel <- hiemods[[as.character(i)]][[1]]
+      #Create QueData:
+      P_dicts <- colnames(nodeModel$trainingData)
+      P_dicts <- P_dicts[P_dicts != ".outcome"]
+      nodeQueData <- DataReshaper(ExpData = Query, Predictors = P_dicts)
+      #Calculate node Scores:
+      nodeScores <- scoR(model = nodeModel,
                             format = "prob",
-                            Query = Query,
+                            QueData = nodeQueData,
                             node = i)
-      ProbTab <- cbind(ProbTab, nodeProb)
-    } #closes the for loop.
 
-  }else{# thread is specified. For now, use this only when running on bigMem machines.
+      #Tally votes for class from the local model:
+      nodePvotes <- PvoteR(model = nodeModel, QueData = nodeQueData)
+      #Calculate the probability weights of each class by random permutation:
+      nodeQueWs <- graWeighteR(model = nodeModel, QueData = nodeQueData )
+      #Estimate Certainty of prediction probabilities per class:
+      nodeQueCers <- ceR(qP = nodePvotes, qW = nodeQueWs)
+
+      Scores <- cbind(Scores, nodeScores)
+      Pvotes <- cbind(Pvotes, nodePvotes)
+      QueWs <- cbind(QueWs, nodeQueWs)
+      QueCers <- cbind(QueCers, nodeQueCers)
+    } #closes the for loop.
+    S_path_prod <- ClassProbCalculator(tree = tree, nodes_P_all = Scores)
+    HieMetrxObj <- new(Class = "HieMetrics",
+                       Pvotes = Pvotes,
+                       QueWs = QueWs,
+                       QueCers = QueCers,
+                       Scores = S_path_prod)
+
+  }else{# FIX THIS PART! thread is specified. For now, use this only when running on bigMem machines.
     cl <- makePSOCKcluster(thread)
     registerDoParallel(cl)
     print(paste("registered cores is", getDoParWorkers(), sep = " "))
 
     nodeProb <- foreach(i=node.list, .inorder = TRUE, .combine=cbind) %dopar% {
-      Predictor(model = hiemods[[as.character(i)]][[1]],
+      scoR(model = hiemods[[as.character(i)]][[1]],
                 format = "prob",
                 Query = Query,
                 node = i)
@@ -77,7 +103,7 @@ CTTraverser <- function(Query, tree, hiemods, thread=NULL){
     ProbTab <- cbind(ProbTab, nodeProb)
   }
 
-  return(ProbTab)
+  return(HieMetrxObj)
 }
 
 #' A function to generate a random tree using 'ape' package.
