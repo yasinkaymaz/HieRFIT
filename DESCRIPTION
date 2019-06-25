@@ -16,7 +16,11 @@ Imports:
     data.tree,
     caret,
     dplyr,
-    entropy,
+    entropy
+Suggests:
+    Seurat,
+    grid,
+    gridExtra,
     biomaRt,
     doParallel
 RoxygenNote: 6.1.1
