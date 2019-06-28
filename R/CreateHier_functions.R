@@ -69,6 +69,7 @@ Modeller <- function(RefData, ClassLabels=NULL, mod.meth="rf", cv.k=2, thread=NU
                             prefix = prefix,
                             mod.meth = mod.meth,
                             train.control = train.control,
+                            thread = thread,
                             ...)
     model <- list(model)
   } else if(mod.meth == "svmLinear"){
@@ -77,6 +78,7 @@ Modeller <- function(RefData, ClassLabels=NULL, mod.meth="rf", cv.k=2, thread=NU
                      prefix = prefix,
                      mod.meth = mod.meth,
                      train.control = train.control,
+                     thread = thread,
                      ...)
     model <- list(model)
   } else if(mod.meth == "hrf"){
@@ -104,7 +106,7 @@ HieRandForest <- function(RefData, ClassLabels, tree, thread=3){
   hiemods <- vector("list", length = max(node.list))
 
   Rdata <- DataReshaper(Data = RefData, Predictors = make.names(rownames(RefData)), ClassLabels = ClassLabels)
-
+  #thread=NULL #TEMPORARY for Skipping foreach.
   if(is.null(thread)){
     #Build a local classifier for each node in the tree. Binary or multi-class mixed.
     for(i in node.list){
@@ -114,9 +116,11 @@ HieRandForest <- function(RefData, ClassLabels, tree, thread=3){
   }else{# thread is specified. For now, use this only when running on bigMem machines.
     cl <- makePSOCKcluster(thread)
     registerDoParallel(cl)
+    clusterEvalQ(cl, .libPaths("/n/home13/yasinkaymaz/biotools/Rlibs/"))
+
     print(paste("registered cores is", getDoParWorkers(), sep = " "))
 
-    out <- foreach(i=node.list, .packages = c('ggplot2'), .inorder = TRUE) %dopar% {
+    out <- foreach(i=node.list, .packages = c('caret'), .inorder = TRUE, .export = ls(.GlobalEnv)) %dopar% {
       NodeTrainer(Tdata = Rdata, tree = tree, node = i)
     }
     stopCluster(cl)
@@ -136,8 +140,11 @@ HieRandForest <- function(RefData, ClassLabels, tree, thread=3){
 #' @param RefData a Normalized expression data matrix, genes in rows and samples in columns.
 #' @param ClassLabels A list of class labels for cells/samples in the Data matrix. Same length as colnames(RefData).
 #' @param mod.meth The model training method, "rf" for random forest.
-RandForestWrap <- function(RefData, ClassLabels, prefix, mod.meth, train.control, ncor=5, ...){
-  library(doParallel)
+RandForestWrap <- function(RefData, ClassLabels, prefix, mod.meth, train.control, thread=5, ...){
+  #library(doParallel)
+  library(caret)
+  library(doMC)
+  registerDoMC(cores = thread)
   #1. Select the predictors.
   P_dicts <- FeatureSelector(Data = RefData,
                              ClassLabels = ClassLabels,
@@ -151,8 +158,8 @@ RandForestWrap <- function(RefData, ClassLabels, prefix, mod.meth, train.control
                           ClassLabels = ClassLabels, ...)
   print(RefData[1:5, 1:5])
   #3. Train the model.
-  cl <- makePSOCKcluster(ncor)
-  registerDoParallel(cl)
+  #cl <- makePSOCKcluster(ncor)
+  #registerDoParallel(cl)
   model <- caret::train(ClassLabels~.,
                         data = TrainData,
                         method = mod.meth,
@@ -162,12 +169,8 @@ RandForestWrap <- function(RefData, ClassLabels, prefix, mod.meth, train.control
                         outscale = FALSE,
                         preProcess = c("center", "scale"),
                         ntree=50,
-                        trControl = train.control
-                        #sampsize=rep(1,length(unique(ClassLabels))),
-                        #strata= RefData$ClassLabels,
-                        #classwt=table(ClassLabels)/sum(table(ClassLabels)),
-                        )
-  stopCluster(cl)
+                        trControl = train.control)
+  #stopCluster(cl)
 
   return(model)
 }
@@ -311,3 +314,4 @@ NodeTrainer <- function(Tdata, tree, node){
                        save.int.f=FALSE)
   return(node.mod)
 }
+

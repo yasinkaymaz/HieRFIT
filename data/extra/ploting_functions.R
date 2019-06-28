@@ -37,10 +37,25 @@ multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
 }
 
 #' This function uses 'ape' package.
-#' @param tree a tree object in phylo format.
+#' @param treeTable a tree table in dataframe.
 #' @usage PlotTopo(RandTreeSim(LN = sample(5:20, 1)))
-PlotTopo <- function(tree){### Update with data.tree plotting
-  ape::plot.phylo(x = tree, direction = "downwards", show.node.label = TRUE)
+PlotTopo <- function(treeTable, ...){### Update with data.tree plotting
+  library(data.tree)
+  library(DiagrammeR)
+  treeTable$pathString <- apply(cbind("TaxaRoot", treeTable), 1, paste0, collapse="/")
+  taxa <- as.Node(treeTable)
+  SetGraphStyle(taxa, rankdir = "LR")
+  #SetGraphStyle(taxa, rankdir = "TB")
+  SetEdgeStyle(taxa, arrowhead = "vee", color = "grey35", penwidth = "2px")
+  SetNodeStyle(taxa, style = "filled,rounded",
+               shape = "box", fillcolor = "LightBlue",
+               fontname = "helvetica", fontcolor="black",
+               tooltip = GetDefaultTooltip, width=3)
+
+  pp <- plot(taxa, direction = "descend")
+
+  return(pp)
+  #ape::plot.phylo(x = tree, direction = "downwards", show.node.label = TRUE)
   #ape::nodelabels()
 }
 

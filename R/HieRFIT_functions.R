@@ -42,32 +42,18 @@ HieRFIT <- function(Query, refMod, Prior=NULL, xSpecies=NULL, alpha=.9){
     Query_d <- as.matrix(Query@data)}else{Query_d <- Query}
 
   if( !is.null(xSpecies)) {
-    if(xSpecies == "mouse2rat"){ ## pay attention! swapped logic.
+    if(xSpecies == "mouse2rat"){ ## pay attention! flipped logic.
       print("Rat to mouse gene id conversion...")
       ort <- Gmor(RatGenes = rownames(Query_d))
       Query_d <- Query_d[which(rownames(Query_d) %in% ort$external_gene_name), ]
       rownames(Query_d) <- ort[match(rownames(Query_d), ort$external_gene_name),]$mmusculus_homolog_associated_gene_name
     }
   }
-
-  #Query backround
-  #Query_bg <- RandomizeR(Query_d)
-
   if(refMod@modtype == "hrf"){
-    # To Do: Implement parallel here as well!
-
     HieMetObj <- CTTraverser(Query = Query_d, tree = refMod@tree[[1]], hiemods = refMod@model)
-    #P_path_prod <- ClassProbCalculator(tree = refMod@tree[[1]], nodes_P_all = HieMetObj@Pvotes)
-    #Run uncertainty function
-    #nodes_P_all_bg <- CTTraverser(Query = Query_bg, tree = refMod@tree[[1]], hiemods = refMod@model)
-    #P_path_prod_bg <- ClassProbCalculator(tree = refMod@tree[[1]], nodes_P_all = nodes_P_all_bg)
-
   }else{#FIX THIS
     P_path_prod <- Predictor(model = refMod@model[[1]], Query = Query_d)
-    #Run uncertainty function
-    #P_path_prod_bg <- Predictor(model = refMod@model[[1]], Query = Query_bg)
   }
-
   #Evaluate scores and run uncertainty function, then, project the class labels.
   ScoreEvals <- ScoreEval(ScoreObs = HieMetObj@Scores, ProbCert = HieMetObj@QueCers, alpha=alpha)
 
@@ -149,12 +135,9 @@ CTTraverser <- function(Query, tree, hiemods, thread=NULL){
   QueCers <- data.frame(row.names = colnames(Query))
 
   if(is.null(thread)){
-    #
     for(i in node.list){
       nodeModel <- hiemods[[as.character(i)]][[1]]
       #Create QueData:
-      #P_dicts <- colnames(nodeModel$trainingData)
-      #P_dicts <- P_dicts[P_dicts != ".outcome"]
       P_dicts <- nodeModel$finalModel$xNames
       nodeQueData <- DataReshaper(Data = Query, Predictors = P_dicts)
       #Calculate node Scores:
@@ -232,7 +215,6 @@ graWeighteR <- function(model, QueData){
   }
   Ws <- colMeans(PvoteR(model = model, QueData = QueData_R))
   QueWeights <- t(as.data.frame(Ws))[rep(1, each=nrow(QueData)), ]
-  #rownames(QueWeights) <- rownames(QueData)
   QueWeights <- as.data.frame(QueWeights)
   return(QueWeights)
 }
@@ -246,7 +228,6 @@ ceR <- function(qP, qW){
   for(i in 1:length(qP[,1])){
     QueCers <- rbind(QueCers, GetCertaintyArray(p = qP[i,], w = qW[i,]))
   }
-  #rownames(QueCers) <- rownames(qP)
   colnames(QueCers) <- colnames(qP)
   QueCers <- as.data.frame(QueCers)
   return(QueCers)
@@ -257,9 +238,6 @@ ceR <- function(qP, qW){
 #' @param QueData
 #' @param format type of prediction output, "prob" or "resp".
 scoR <- function(model, QueData, format="prob", node=NULL){
-  # P_dicts <- colnames(model$trainingData)
-  # P_dicts <- P_dicts[P_dicts != ".outcome"]
-  # QueData <- DataReshaper(Data = Query, Predictors = P_dicts)
 
   if(is.null(node)){
     QuePred <- as.data.frame(predict(model, QueData, type = "prob", scale=T, center=T))

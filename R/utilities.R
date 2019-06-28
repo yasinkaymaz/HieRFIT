@@ -14,7 +14,22 @@ DigestTree <- function(tree) {
   return(all.nodes)
 }
 
-CheckTreeIntegrity <- function(){}
+NodePredictorImportance <- function(treeTable, RefMod){
+
+  tree <- CreateTree(treeTable = treeTable)
+  node.list <- DigestTree(tree = tree)
+  pdf("out.pdf")
+  for(i in node.list){
+    varImpPlot(RefMod@model[[as.character(i)]][[1]]$finalModel,
+               n.var = 10,
+               main = paste("Important predictors of node", tree$node.label[i-length(tree$tip.label)], sep="\n"))
+    par()
+  }
+  dev.off()
+
+}
+
+
 
 #' A function to generate a random tree using 'ape' package.
 #' Returns a tree object.
@@ -94,7 +109,7 @@ FixLab <- function(xstring){
   return(xstring)
 }
 
-SubsetTData <- function(Tdata, tree, node){
+SubsetTData <- function(Tdata, tree, node, transpose=FALSE){
   #This function subsets a Tdata with class labels (trainingData - output of DataReshaper)
   #And updates the class labels.
   # 1. Extract the data under the node. Subsample if necessary.
@@ -129,8 +144,12 @@ SubsetTData <- function(Tdata, tree, node){
   }
   #Here balance the class sizes with median:
   #SubTdata <- DownSampleRef(RefData = SubTdata, min_n = round(median(table(SubTdata$ClassLabels))))
+  if(transpose){
+    return(t(SubTdata))
+  }else{
+    return(SubTdata)
+  }
 
-  return(t(SubTdata))
 }
 
 #' An internal function to prepare a training/test dataset for model generation.
@@ -208,10 +227,8 @@ GetCertaintyArray <- function(p, w){
     w[i] <- w[i]+1e-10#to prevent math err.
     if(p[i] > w[i]){
       lambda=1
-      #lambda=p[i] - w[i]
     }else{
         lambda=-1
-        #lambda=p[i] - w[i]
         }
     U <- c(U, (lambda*(p[i]-w[i])^2)/( ((1-2*w[i])*p[i])+w[i]^2 ) )
   }
@@ -233,7 +250,6 @@ CVRunner <- function(Ref, ClassLabels, TreeTable=NULL, cv_k=5, method="hrf"){
                               refmod <- CreateHieR(RefData = trainRef,
                                                    ClassLabels = trainClassLabels,
                                                    TreeTable = TreeTable)
-
                               #Hierfit
                               testClassLables <- ClassLabels[flds[[1]]]
                               testRef <- Ref[, flds[[1]]]
@@ -268,7 +284,7 @@ EvaluateCertainty <- function(RefSeuObj, IdentityCol, RefMod, Uinter=20, perm_n=
                          refMod = RefMod,
                          Prior = RefSeuObj@meta.data[testcells, IdentityCol],
                          alpha = ai)
-      print(RefSeuObj@meta.data[testcells, ]$ColClassLabs)
+
       PriorPostTable <- data.frame(Prior = testObj@Prior,
                                    Projection = testObj@Evaluation$Projection)
       hPRF.out <- hPRF(tpT = PriorPostTable, tree = RefMod@tree[[1]])
