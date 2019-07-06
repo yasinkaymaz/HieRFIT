@@ -41,6 +41,8 @@ HieRFIT <- function(Query, refMod, Prior=NULL, xSpecies=NULL, alpha=.9){
   if (class(Query) == "seurat" | class(Query) == "Seurat" ){
     Query_d <- as.matrix(Query@data)}else{Query_d <- Query}
 
+  rownames(Query_d) <- FixLab(xstring = rownames(Query_d))
+
   if( !is.null(xSpecies)) {
     if(xSpecies == "mouse2rat"){ ## pay attention! flipped logic.
       print("Rat to mouse gene id conversion...")
@@ -74,59 +76,13 @@ HieRFIT <- function(Query, refMod, Prior=NULL, xSpecies=NULL, alpha=.9){
   return(object)
 }
 
-#' A function for evalating the uncertainty.
-#' @param ScoreObs P_path_prod for observed scores
-#' @param ProbCert Certainty scores.
-ScoreEval <- function(ScoreObs, ProbCert, alpha=.9){
-
-  df <- data.frame(row.names = rownames(ScoreObs))
-  for(i in 1:length(ProbCert[,1])){
-    candits <- colnames(ProbCert)[ProbCert[i,] > alpha]
-    if(length(candits) == 0){
-      classL <- "Undetermined"
-      classU <- max(ProbCert[i,])
-      classS <- max(ScoreObs[i,])
-    }else if(length(candits) == 1){
-      classL <- candits
-      classU <- ProbCert[i,classL]
-      classS <- ScoreObs[i,classL]
-    }else{
-      classL <- colnames(ScoreObs[i,candits])[apply(ScoreObs[i,candits], 1, which.max)]
-      classU <- ProbCert[i,classL]
-      classS <- ScoreObs[i,classL]
-    }
-
-    df <- rbind(df, data.frame(row.names = rownames(ProbCert[i,]),
-                               Score = classS,
-                               Certainty = classU,
-                               Projection = classL))
-
-  }
-
-
-  #  library(dplyr)
-  #  colMax <- function(x) sapply(x, max, na.rm = TRUE)
-  #  #Substract the Background_max.i from Scores
-  #  bg_max <- colMax(ScoreBg)
-  #  ScoreObs <- ScoreObs - t(as.data.frame(bg_max))[rep(1, each=nrow(ScoreObs)), ]
-  #
-  #  ScoreEval <- ScoreObs
-  #  ScoreEval$BestScore <- apply(ScoreObs, 1, function(x) max(x))
-  #  ScoreEval$Projection <- colnames(ScoreObs)[apply(ScoreObs, 1, which.max)]
-  #  ScoreEval <- ScoreEval %>%
-  #    mutate(Projection = if_else( (BestScore <= 0),
-  #                                 "Undetermined",
-  #                                 as.character(Projection) )) %>% as.data.frame()
-  return(df)
-}
-
 #' A hierarchical Classifier Tree Traverser function.
 #' @param Query is the input query data. rows are genes and columns are cells.
 #' @param tree a tree topology with which hrf model was trained on. 'phylo' format.
 #' @param hiemods models list from HieRandForest function.
 #' @param thread number of workers to be used for parallel processing. Default is Null, so serial processing.
 CTTraverser <- function(Query, tree, hiemods, thread=NULL){
-  library(doParallel)
+
   node.list <- DigestTree(tree = tree)
   #Create a table for storing node probabilities.
   Scores <- data.frame(row.names = colnames(Query))
@@ -136,10 +92,19 @@ CTTraverser <- function(Query, tree, hiemods, thread=NULL){
 
   if(is.null(thread)){
     for(i in node.list){
-      nodeModel <- hiemods[[as.character(i)]][[1]]
+      #nodeModel <- hiemods[[as.character(i)]][[1]]
+      nodeModel <- hiemods[[as.character(i)]]
       #Create QueData:
       P_dicts <- nodeModel$finalModel$xNames
-      nodeQueData <- DataReshaper(Data = Query, Predictors = P_dicts)
+      nodeQueData <- Query[which(rownames(Query) %in% P_dicts), ]
+      nodeQueData <- t(nodeQueData)
+      #Add the missing features matrix
+      mp <- P_dicts[which(!P_dicts %in% colnames(nodeQueData))]
+      mp_df <- data.frame(matrix(0,
+                                 ncol = length(mp),
+                                 nrow = length(colnames(Query))))
+      colnames(mp_df) <- mp
+      nodeQueData <- cbind(nodeQueData, mp_df)
       #Calculate node Scores:
       nodeScores <- scoR(model = nodeModel,
                          format = "prob",
@@ -166,6 +131,7 @@ CTTraverser <- function(Query, tree, hiemods, thread=NULL){
                        Scores = S_path_prod)
 
   }else{# FIX THIS PART! thread is specified. For now, use this only when running on bigMem machines.
+    library(doParallel)
     cl <- makePSOCKcluster(thread)
     registerDoParallel(cl)
     print(paste("registered cores is", getDoParWorkers(), sep = " "))
@@ -209,10 +175,7 @@ PvoteR <- function(model, QueData, format="prob", node=NULL){
 #' @return QueWeights a set of probability weightes per class to be used in asymetrix entropy estimations.
 graWeighteR <- function(model, QueData){
   #Randomizing only feature space
-  QueData_R <- NULL
-  for(i in 1:1){
-    QueData_R <- rbind(QueData_R, RandomizeR(df = QueData))
-  }
+  QueData_R <- RandomizeR(df = QueData, n = 10)
   Ws <- colMeans(PvoteR(model = model, QueData = QueData_R))
   QueWeights <- t(as.data.frame(Ws))[rep(1, each=nrow(QueData)), ]
   QueWeights <- as.data.frame(QueWeights)
@@ -225,9 +188,9 @@ graWeighteR <- function(model, QueData){
 #' @return QueCers
 ceR <- function(qP, qW){
   QueCers <- NULL
-  for(i in 1:length(qP[,1])){
-    QueCers <- rbind(QueCers, GetCertaintyArray(p = qP[i,], w = qW[i,]))
-  }
+  qL <- qP > qW
+  qL <- ifelse(qL == TRUE, 1, -1)
+  QueCers <- (qL*(qP-qW)^2)/( ((1-2*qW)*qP)+qW^2 )
   colnames(QueCers) <- colnames(qP)
   QueCers <- as.data.frame(QueCers)
   return(QueCers)
@@ -256,18 +219,50 @@ scoR <- function(model, QueData, format="prob", node=NULL){
   return(QuePred)
 }
 
+#' A function for evalating the uncertainty.
+#' @param ScoreObs P_path_prod for observed scores
+#' @param ProbCert Certainty scores.
+ScoreEval <- function(ScoreObs, ProbCert, alpha=.9){
+
+  df <- data.frame(row.names = rownames(ScoreObs))
+  for(i in 1:length(ProbCert[,1])){
+    candits <- colnames(ProbCert)[ProbCert[i,] > alpha]
+    if(length(candits) == 0){
+      classL <- "Undetermined"
+      classU <- max(ProbCert[i,])
+      classS <- max(ScoreObs[i,])
+    }else if(length(candits) == 1){
+      classL <- candits
+      classU <- ProbCert[i,classL]
+      classS <- ScoreObs[i,classL]
+    }else{
+      classL <- colnames(ScoreObs[i,candits])[apply(ScoreObs[i,candits], 1, which.max)]
+      classU <- ProbCert[i,classL]
+      classS <- ScoreObs[i,classL]
+    }
+
+    df <- rbind(df, data.frame(row.names = rownames(ProbCert[i,]),
+                               Score = classS,
+                               Certainty = classU,
+                               Projection = classL))
+  }
+  return(df)
+}
+
 #' A function to calculate class scores for all internal and tip node classes.
 #' @param tree
 #' @param nodes_P_all a table output from CTTraverser() which contains all class probabilities from every node.
 #' @return P_path_prod a table for products of ancestor node scores.
 ClassProbCalculator <- function(tree, nodes_P_all){
-  #CTip_table <- data.frame(matrix(ncol = 0, nrow = length(rownames(Htable))))
   P_path_prod <- data.frame(row.names = rownames(nodes_P_all))
   clabs <- c(tree$tip.label, tree$node.label)[tree$edge[, 2]]
-
   for(cl in clabs){
     map <- GetAncestPath(tree = tree, class = cl)
-    nt_prob <- data.frame(matrixStats::rowProds(as.matrix(nodes_P_all[, map])))
+    if(length(map) > 1){
+      nt_prob <- data.frame(apply(nodes_P_all[, map], 1, prod))
+    }else{
+      nt_prob <- data.frame(nodes_P_all[,map])
+    }
     colnames(nt_prob) <- cl
     P_path_prod <- cbind(P_path_prod, nt_prob)
   }
