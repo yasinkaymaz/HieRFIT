@@ -137,7 +137,7 @@ CTTraverser <- function(Query, tree, hiemods, thread=NULL){
     print(paste("registered cores is", getDoParWorkers(), sep = " "))
 
     nodeProb <- foreach(i=node.list, .inorder = TRUE, .combine=cbind) %dopar% {
-      scoR(model = hiemods[[as.character(i)]][[1]],
+      scoR(model = hiemods[[as.character(i)]],
            format = "prob",
            QueData = Query,
            node = i)

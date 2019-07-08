@@ -168,12 +168,12 @@ NodeTrainer <- function(Rdata, tree, node, f_n=200, tree_n=500, ...){
 #' @usage Predictors <- FeatureSelector(Data = as.matrix(SeuratObject@data), PCs = 10, num = 2000)
 FeatureSelector <- function(Data, ClassLabels, PC_n = 40, num = 200, ...) {
   #do pca
-  pcatrain <- prcomp(Data, center = TRUE, scale=TRUE, rank. = PCs)
+  pcatrain <- prcomp(Data, center = TRUE, scale=TRUE, rank. = PC_n)
   pcadata <- data.frame(pcatrain$x, ClassLabels = ClassLabels)
   cls <- levels(ClassLabels)
 
   ptab <- NULL
-  for(i in 1:PCs){
+  for(i in 1:PC_n){
     PC.stats <- NULL
     for(c in cls){
       p.cl <- t.test(pcadata[pcadata$ClassLabels == c, i],
@@ -187,7 +187,7 @@ FeatureSelector <- function(Data, ClassLabels, PC_n = 40, num = 200, ...) {
 
   ptab <- as.data.frame(ptab)
   colnames(ptab) <- colnames(pcadata)[-length(pcadata[1,])]
-  ptab <- ptab*length(cls)*PCs#Correct for the multiple test. Bonferroni.
+  ptab <- ptab*length(cls)*PC_n#Correct for the multiple test. Bonferroni.
   #Select only PCs which are significanly separating at least one of the class.
   PCs.sig <- colnames(ptab[, apply(ptab < 0.05, 2 ,any)])
 
@@ -240,4 +240,3 @@ SubsetTData <- function(Tdata, tree, node){
   }
   return(SubTdata)
 }
-
