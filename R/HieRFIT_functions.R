@@ -95,7 +95,7 @@ CTTraverser <- function(Query, tree, hiemods, thread=NULL){
       #nodeModel <- hiemods[[as.character(i)]][[1]]
       nodeModel <- hiemods[[as.character(i)]]
       #Create QueData:
-      P_dicts <- nodeModel$finalModel$xNames
+      P_dicts <- FixLab(xstring = nodeModel$finalModel$xNames)
       nodeQueData <- Query[which(rownames(Query) %in% P_dicts), ]
       nodeQueData <- t(nodeQueData)
       #Add the missing features matrix
@@ -176,7 +176,9 @@ PvoteR <- function(model, QueData, format="prob", node=NULL){
 graWeighteR <- function(model, QueData){
   #Randomizing only feature space
   QueData_R <- RandomizeR(df = QueData, n = 10)
-  Ws <- colMeans(PvoteR(model = model, QueData = QueData_R))
+  pvts_R <- PvoteR(model = model, QueData = QueData_R)
+  Ws <- apply(pvts_R, 2, mean) + apply(pvts_R, 2, sd)
+  #Ws <- colMeans(PvoteR(model = model, QueData = QueData_R))
   QueWeights <- t(as.data.frame(Ws))[rep(1, each=nrow(QueData)), ]
   QueWeights <- as.data.frame(QueWeights)
   return(QueWeights)

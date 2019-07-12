@@ -63,6 +63,7 @@ FixLab <- function(xstring){
   #Replace white space with '_'
   xstring <- gsub(xstring, pattern = " ", replacement = "_")
   xstring <- gsub(xstring, pattern = "\\+|-", replacement = ".")
+  xstring <- gsub(xstring, pattern = "`", replacement = "")
   return(xstring)
 }
 

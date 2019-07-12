@@ -191,7 +191,7 @@ FeatureSelector <- function(Data, ClassLabels, PC_n = 40, num = 200, ...) {
   #Select only PCs which are significanly separating at least one of the class.
   PCs.sig <- colnames(ptab[, apply(ptab < 0.05, 2 ,any)])
 
-  if(length(PCs.sig) == 0){PCs.sig <- c("PC1", "PC2", "PC3")}
+  if(length(PCs.sig) == 0){PCs.sig <- paste(rep("PC", 3), 1:3, sep="")}
 
   #Calculate the variance proportions explained by each selected PC.
   vars <- apply(pcatrain$x, 2, var)
