@@ -6,17 +6,14 @@ Author: Yasin Kaymaz, Bioinformatics Scientist, Harvard University
 Author@R: person("Yasin", "Kaymaz", email = "yasinkaymaz@gmail.com",role = c("aut", "cre"))
 Maintainer: The package maintainer <yasinkaymaz@g.harvard.edu>
 Description: Cell type assignment is one of the cumbersome challenges when analyzing scRNAseq datasets. This package provides a function to predict cell types based on transcriptional profiles using supervised machine learning techniques.
-License: Licenced under GNU General Public License v3.0.
+License: GPL-3
 Encoding: UTF-8
 LazyData: true
 Imports:
     methods,
-    Matrix,
     ape,
     data.tree,
-    caret,
-    dplyr,
-    entropy
+    caret
 Suggests:
     Seurat,
     grid,

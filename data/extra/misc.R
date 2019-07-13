@@ -1,4 +1,211 @@
 
+
+ParApp <- function() {
+  '"
+  Sets the parameters used throughout the run.
+  "'
+  PCs <- 20 # number of principle components to be analyzed.
+  Pred_n <- 1000 # number of predictors aimed to be collected.
+  prefix <- ""
+}
+
+
+#' This function calculates a scaled Kullback-Leibler divergence
+#' @param probs a list of observed probability scores.
+#' @return KLscaled = KLe/KLmax, where KLe is the empirical divergence given
+#' the distributions while KLmax is the maximum KLe value that can be achieved
+#' given the number of items.
+KLeCalc <- function(probs){
+  class_n <- length(probs)
+  null <- c(1, rep(0, class_n-1))
+  KLe <- entropy::KL.empirical(y1 = as.numeric(probs), y2 = rep(1/class_n, class_n))
+  KLmax <- entropy::KL.empirical(y1 = as.numeric(null), y2 = rep(1/class_n, class_n))
+  KLscaled <- KLe/KLmax
+  return(KLscaled)
+}
+
+
+#' A function to calculate Asymmetric Entropy
+#' @param p measured probability array
+#' @param w empirically calculated W set
+#' @return U set of certainty values for each probility outcome in p given w.
+GetCertaintyArray <- function(p, w){
+  U <- numeric()
+  for(i in 1:length(p)){
+    w[i] <- w[i]+1e-10#to prevent math err.
+    if(p[i] > w[i]){
+      lambda=1
+    }else{
+      lambda=-1
+    }
+    U <- c(U, (lambda*(p[i]-w[i])^2)/( ((1-2*w[i])*p[i])+w[i]^2 ) )
+  }
+  U <- as.numeric(U)
+  return(U)
+}
+
+
+TipBias <- function(tree, confmat){
+  #confmat is table() of Prior/Prediction comparison
+  err.rate <- NULL
+  for(i in 1:length(tree$tip.label)){
+    nn <- length(GetAncestorsPath(tree=tree, i)[[2]])
+    leafErr <- 1-confmat[tree$tip.label[i],tree$tip.label[i]]/sum(confmat[tree$tip.label[i],])
+    print(paste(i,nn,leafErr,sep = "    "))
+    err.rate <- c(err.rate, leafErr)
+  }
+  err.rate <- data.frame(err.rate)
+  rownames(err.rate) <- tree$tip.label
+  return(err.rate)
+}
+
+
+
+#' A function to generate a random tree using 'ape' package.
+#' Returns a tree object.
+#' @param LN The number of leafs to be in the tree. Default is 8.
+RandTreeSim <- function(LN=8, furcation="binary"){
+  if (furcation == "binary"){
+    tree <- ape::rtree(n = LN, br = NULL)
+    plot(tree, edge.width = 2)
+    tree$edge
+  } else if (furcation == "multi"){#Fix this.
+    tiplabs <- paste("t", seq(1:LN), sep = "")
+    while (length(tiplabs) > 0){
+      sub <- sample(tiplabs, size = sample(seq(1:length(tiplabs)-1)), replace = F)
+      print(sub)
+      tiplabs <- tiplabs[which(!tiplabs %in% sub)]
+    }
+    tree <- ape::read.tree(text="(((L, K), E, F), (G, H));")
+  }
+  return(tree)
+}
+
+#' An internal function to prepare a training/test dataset for model generation.
+#' @param Data a Normalized expression data matrix, genes in rows and samples in columns.
+#' @param Predictors the predictor feature list selected by FeatureSelector.
+#' @param ClassLabels [optional] A list of class labels for cells/samples in the Data matrix. Same length as colnames(Data).
+#' @param alpa variation cutoff for filtering data
+#' @keywords data preparation
+#' @export
+#' @usage trainingData <- DataReshaper(Data = as.matrix(SeuratObject@data), Predictors = genes, ClassLabels = SeuratObject@meta.data$CellTypes)
+DataReshaper <- function(Data, Predictors, ClassLabels, alpa=0.1, ...) {
+  if(missing(Predictors)){#prepare the data for PCA
+    TData <- as.data.frame(t(Data))
+    indx <- sapply(TData, is.factor)
+    TData[indx] <- lapply(TData[indx], function(x) as.numeric(as.character(x)))
+    #Filter candidate predictors before PCA
+    TData <- TData[, apply(TData, 2, var) != 0]
+    TData <- droplevels(TData[, which(matrixStats::colVars(as.matrix(TData)) > alpa)])
+    return(TData)
+
+  } else {
+
+    if (missing(ClassLabels)) {
+      #Then the output is for Query
+      QueData <- as.data.frame(t(Data), col.names=rownames(Data))
+      colnames(QueData) <- make.names(colnames(QueData))
+      QueData_sub <- droplevels(QueData[, which(colnames(QueData) %in% Predictors)])
+      #missing Predictors
+      mp <- Predictors[which(!Predictors %in% colnames(QueData))]
+      #Add missing predictors into QueData by setting to 0.
+      mp_df <- data.frame(matrix(0,
+                                 ncol = length(mp),
+                                 nrow = length(colnames(Data))))
+      colnames(mp_df) <- mp
+      QueData <- cbind(QueData_sub, mp_df)
+      QueData <- QueData[, Predictors]
+      return(QueData)
+
+    } else {
+
+      RefData <- as.data.frame(t(Data), col.names=rownames(Data))
+      colnames(RefData) <- make.names(colnames(RefData))
+      #convert factors to numeric
+      indx <- sapply(RefData, is.factor)
+      RefData[indx] <- lapply(RefData[indx], function(x) as.numeric(as.character(x)))
+      RefData$ClassLabels <- factor(make.names(ClassLabels))
+      RefData <- droplevels(RefData[, c(Predictors, "ClassLabels")])
+
+      return(RefData)
+    }
+  }
+}
+
+#' A wrapper function for random forest.
+#' @param RefData a Normalized expression data matrix, genes in rows and samples in columns.
+#' @param ClassLabels A list of class labels for cells/samples in the Data matrix. Same length as colnames(RefData).
+#' @param mod.meth The model training method, "rf" for random forest.
+RandForestWrap <- function(RefData, ClassLabels, prefix, mod.meth, train.control, thread=5, ...){
+  #library(doParallel)
+  library(caret)
+  library(doMC)
+  registerDoMC(cores = thread)
+  #1. Select the predictors.
+  P_dicts <- FeatureSelector(Data = RefData,
+                             ClassLabels = ClassLabels,
+                             PCs = 10,
+                             num = 200,
+                             prefix = prefix,
+                             doPlots = F, ...)
+  #2. Prepare the reference data.
+  TrainData <- DataReshaper(Data = RefData,
+                            Predictors = P_dicts,
+                            ClassLabels = ClassLabels, ...)
+  print(RefData[1:5, 1:5])
+  #3. Train the model.
+  #cl <- makePSOCKcluster(ncor)
+  #registerDoParallel(cl)
+  model <- caret::train(ClassLabels~.,
+                        data = TrainData,
+                        method = mod.meth,
+                        norm.votes = TRUE,
+                        importance = FALSE,
+                        proximity = FALSE,
+                        outscale = FALSE,
+                        preProcess = c("center", "scale"),
+                        ntree=50,
+                        trControl = train.control)
+  #stopCluster(cl)
+
+  return(model)
+}
+
+#' A wrapper function for random forest.
+#' @param RefData a Normalized expression data matrix, genes in rows and samples in columns.
+#' @param ClassLabels A list of class labels for cells/samples in the Data matrix. Same length as colnames(Data).
+#' @param mod.meth The model training method, "svmLinear" for support vector machine.
+SvmWrap <- function(RefData, ClassLabels, prefix, mod.meth, train.control, ncor=5, ...){
+  library(doParallel)
+  #1. Select the predictors.
+  P_dicts <- FeatureSelector(Data = RefData,
+                             ClassLabels = ClassLabels,
+                             PCs = 10,
+                             num = 200,
+                             prefix = prefix,
+                             doPlots = F, ...)
+  #2. Prepare the reference data.
+  TrainData <- DataReshaper(Data = RefData,
+                            Predictors = P_dicts,
+                            ClassLabels = ClassLabels, ...)
+
+  #3. Train the model.
+  cl <- makePSOCKcluster(ncor)
+  registerDoParallel(cl)
+  model <- caret::train(ClassLabels~.,
+                        data = TrainData,
+                        trControl = train.control,
+                        method = mod.meth,
+                        norm.votes = TRUE,
+                        importance = TRUE,
+                        proximity = TRUE,
+                        preProcess = c("center", "scale"),
+                        tuneLength = 10, ...)
+  stopCluster(cl)
+
+  return(model)
+}
+
 #' A wrapper function for quick data processing with Seurat functions
 #' This function allows to determine highly variable genes and scale their expression,
 #' run PCA, tSNE, and cluster detection.
@@ -270,3 +477,25 @@ FlatRF <- function(SeuratObject, testExpSet, model, priorLabels, outputFilename=
   }#Closes missing(SeuratObj)
 }#closes the function
 
+
+#' An internal function to collect model training parameters and direct them to model creation.
+#' @param RefData a Normalized expression data matrix, genes in rows and samples in columns.
+#' @param ClassLabels A list of class labels for cells/samples in the Data matrix. Same length as colnames(Data).
+#' @param mod.meth The model training for hierarchical random forest. Default is "hrf"
+#' @param cv.k Fold cross validation. Default is 5.
+#' @param tree A tree storing relatinship between the class labels. Default is null. required when mod.meth "hrf" is chosen.
+#' @param save.int.f Boolean to save model. Default is False.
+#' @keywords
+#' @export
+#' @usage rf.model <- Modeller(RefData = as.matrix(pbmc1@data), ClassLabels = pbmc1@meta.data$ClusterNames_0.6)
+Modeller <- function(RefData, ClassLabels=NULL, mod.meth="rf", thread=NULL, tree=NULL, save.int.f=FALSE, ...){
+  if(mod.meth == "hrf"){
+    try(if(missing(tree)|| missing(ClassLabels) || missing(RefData))
+      stop("Please, provide the required inputs!"))
+    model <- HieRandForest(RefData = RefData,
+                           ClassLabels = ClassLabels,
+                           tree, thread = thread)
+  }
+
+  return(model)
+}

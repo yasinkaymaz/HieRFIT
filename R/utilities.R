@@ -1,14 +1,5 @@
 #Utility functions:
 
-ParApp <- function() {
-  '"
-  Sets the parameters used throughout the run.
-  "'
-  PCs <- 20 # number of principle components to be analyzed.
-  Pred_n <- 1000 # number of predictors aimed to be collected.
-  prefix <- ""
-}
-
 DigestTree <- function(tree) {
   all.nodes <- unique(tree$edge[,1])
   return(all.nodes)
@@ -30,27 +21,6 @@ NodePredictorImportance <- function(treeTable, RefMod){
 }
 
 
-
-#' A function to generate a random tree using 'ape' package.
-#' Returns a tree object.
-#' @param LN The number of leafs to be in the tree. Default is 8.
-RandTreeSim <- function(LN=8, furcation="binary"){
-  if (furcation == "binary"){
-    tree <- ape::rtree(n = LN, br = NULL)
-    plot(tree, edge.width = 2)
-    tree$edge
-  } else if (furcation == "multi"){#Fix this.
-    tiplabs <- paste("t", seq(1:LN), sep = "")
-    while (length(tiplabs) > 0){
-      sub <- sample(tiplabs, size = sample(seq(1:length(tiplabs)-1)), replace = F)
-      print(sub)
-      tiplabs <- tiplabs[which(!tiplabs %in% sub)]
-    }
-    tree <- ape::read.tree(text="(((L, K), E, F), (G, H));")
-  }
-  return(tree)
-}
-
 #' A function to retrieve corresponding leafs of the child nodes of a given node.
 #' @param tree A tree storing relatinship between the class labels.
 #' @param node a particular non-terminal node in the tree.
@@ -64,7 +34,7 @@ GetChildNodeLeafs <- function(tree, node){
   c.tips <- list()
   for (c in children){
     if(c > length(tree$tip.label)){
-      print(paste("extracting tips for node", c, sep=" "))
+      #print(paste("extracting tips for node", c, sep=" "))
       c.tips[[c]] <- ape::extract.clade(tree, c)$tip.label
     }else{
       c.tips[[c]] <- tree$tip.label[ordered_tips][match(c, ordered_tips)]
@@ -86,19 +56,6 @@ GetAncestPath <- function(tree, class){
   return(path)
 }
 
-TipBias <- function(tree, confmat){
-  #confmat is table() of Prior/Prediction comparison
-  err.rate <- NULL
-  for(i in 1:length(tree$tip.label)){
-    nn <- length(GetAncestorsPath(tree=tree, i)[[2]])
-    leafErr <- 1-confmat[tree$tip.label[i],tree$tip.label[i]]/sum(confmat[tree$tip.label[i],])
-    print(paste(i,nn,leafErr,sep = "    "))
-    err.rate <- c(err.rate, leafErr)
-  }
-  err.rate <- data.frame(err.rate)
-  rownames(err.rate) <- tree$tip.label
-  return(err.rate)
-}
 
 #' A function to fix class labels.
 #' @param xstring is a list of class labels in character.
@@ -106,134 +63,8 @@ FixLab <- function(xstring){
   #Replace white space with '_'
   xstring <- gsub(xstring, pattern = " ", replacement = "_")
   xstring <- gsub(xstring, pattern = "\\+|-", replacement = ".")
+  xstring <- gsub(xstring, pattern = "`", replacement = "")
   return(xstring)
-}
-
-SubsetTData <- function(Tdata, tree, node, transpose=FALSE){
-  #This function subsets a Tdata with class labels (trainingData - output of DataReshaper)
-  #And updates the class labels.
-  # 1. Extract the data under the node. Subsample if necessary.
-  childNodes <- GetChildNodeLeafs(tree = tree, node = node)
-
-  SubTdata <- NULL
-  #loop through child nodes that are not null in the list.
-  for (i in which(lapply(childNodes, length) > 0)){
-
-    Subdata <- droplevels(Tdata[which(Tdata$ClassLabels %in% childNodes[i][[1]]), ])
-    print(childNodes[i][[1]])
-    print(class(childNodes[i][[1]]))
-    print(Subdata[1:4,1:4])
-    if (i > length(tree$tip.label)){# if the node is not a leaf node, then
-      if(!is.null(tree$node.label)){# if labels for subnodes exist
-        labels <- c(tree$tip.label, tree$node.label)
-        #Replace labels with subnode labels.
-        print(i)
-        print(labels[i])
-        Subdata$ClassLabels <- as.factor(labels[i])
-        print(paste("For Node", i, "the label is:", labels[i], sep = " "))
-      } else {
-        #if subnodes don't exist, replace class tip labels with childnode label.
-        Subdata$ClassLabels <- as.factor(i)
-      }
-    } else {#if the node is a terminal leaf
-      #Replace class tip labels with Leaf labels.
-      Subdata$ClassLabels <- as.factor(childNodes[i][[1]])
-    }
-    #Combine with all other child node data
-    SubTdata <- rbind(SubTdata, Subdata)
-  }
-  #Here balance the class sizes with median:
-  #SubTdata <- DownSampleRef(RefData = SubTdata, min_n = round(median(table(SubTdata$ClassLabels))))
-  if(transpose){
-    return(t(SubTdata))
-  }else{
-    return(SubTdata)
-  }
-
-}
-
-#' An internal function to prepare a training/test dataset for model generation.
-#' @param Data a Normalized expression data matrix, genes in rows and samples in columns.
-#' @param Predictors the predictor feature list selected by FeatureSelector.
-#' @param ClassLabels [optional] A list of class labels for cells/samples in the Data matrix. Same length as colnames(Data).
-#' @param alpa variation cutoff for filtering data
-#' @keywords data preparation
-#' @export
-#' @usage trainingData <- DataReshaper(Data = as.matrix(SeuratObject@data), Predictors = genes, ClassLabels = SeuratObject@meta.data$CellTypes)
-DataReshaper <- function(Data, Predictors, ClassLabels, alpa=0.1, ...) {
-  if(missing(Predictors)){#prepare the data for PCA
-    TData <- as.data.frame(t(Data))
-    indx <- sapply(TData, is.factor)
-    TData[indx] <- lapply(TData[indx], function(x) as.numeric(as.character(x)))
-    #Filter candidate predictors before PCA
-    TData <- TData[, apply(TData, 2, var) != 0]
-    TData <- droplevels(TData[, which(matrixStats::colVars(as.matrix(TData)) > alpa)])
-    return(TData)
-
-  } else {
-
-    if (missing(ClassLabels)) {
-      #Then the output is for Query
-      QueData <- as.data.frame(t(Data), col.names=rownames(Data))
-      colnames(QueData) <- make.names(colnames(QueData))
-      QueData_sub <- droplevels(QueData[, which(colnames(QueData) %in% Predictors)])
-      #missing Predictors
-      mp <- Predictors[which(!Predictors %in% colnames(QueData))]
-      #Add missing predictors into QueData by setting to 0.
-      mp_df <- data.frame(matrix(0,
-                                 ncol = length(mp),
-                                 nrow = length(colnames(Data))))
-      colnames(mp_df) <- mp
-      QueData <- cbind(QueData_sub, mp_df)
-      QueData <- QueData[, Predictors]
-      return(QueData)
-
-    } else {
-
-      RefData <- as.data.frame(t(Data), col.names=rownames(Data))
-      colnames(RefData) <- make.names(colnames(RefData))
-      #convert factors to numeric
-      indx <- sapply(RefData, is.factor)
-      RefData[indx] <- lapply(RefData[indx], function(x) as.numeric(as.character(x)))
-      RefData$ClassLabels <- factor(make.names(ClassLabels))
-      RefData <- droplevels(RefData[, c(Predictors, "ClassLabels")])
-
-      return(RefData)
-    }
-  }
-}
-
-#' This function calculates a scaled Kullback-Leibler divergence
-#' @param probs a list of observed probability scores.
-#' @return KLscaled = KLe/KLmax, where KLe is the empirical divergence given
-#' the distributions while KLmax is the maximum KLe value that can be achieved
-#' given the number of items.
-KLeCalc <- function(probs){
-  class_n <- length(probs)
-  null <- c(1, rep(0, class_n-1))
-  KLe <- entropy::KL.empirical(y1 = as.numeric(probs), y2 = rep(1/class_n, class_n))
-  KLmax <- entropy::KL.empirical(y1 = as.numeric(null), y2 = rep(1/class_n, class_n))
-  KLscaled <- KLe/KLmax
-  return(KLscaled)
-}
-
-#' A function to calculate Asymmetric Entropy
-#' @param p measured probability array
-#' @param w empirically calculated W set
-#' @return U set of certainty values for each probility outcome in p given w.
-GetCertaintyArray <- function(p, w){
-  U <- numeric()
-  for(i in 1:length(p)){
-    w[i] <- w[i]+1e-10#to prevent math err.
-    if(p[i] > w[i]){
-      lambda=1
-    }else{
-        lambda=-1
-        }
-    U <- c(U, (lambda*(p[i]-w[i])^2)/( ((1-2*w[i])*p[i])+w[i]^2 ) )
-  }
-  U <- as.numeric(U)
-  return(U)
 }
 
 CVRunner <- function(Ref, ClassLabels, TreeTable=NULL, cv_k=5, method="hrf"){
@@ -299,14 +130,18 @@ EvaluateCertainty <- function(RefSeuObj, IdentityCol, RefMod, Uinter=20, perm_n=
   return(hPRF_table)
 }
 
-RandomizeR <- function(df){
+RandomizeR <- function(df, n=10){
   #set.seed(192939)
-  dfR <- df[sample(nrow(df)), sample(ncol(df))]
-  rownames(dfR) <- rownames(df)
-  colnames(dfR) <- colnames(df)
+  dfRand <- NULL
+  for (i in 1:n){
+    dfR <- df[sample(nrow(df)), sample(ncol(df))]
+    rownames(dfR) <- rownames(df)
+    colnames(dfR) <- colnames(df)
+    dfRand <- rbind(dfRand, dfR)
+  }
+  dfRand <- dfRand[sample(rownames(dfRand),size = nrow(df)),]
   return(dfR)
 }
-
 #' Homology mapping via orhologous genes between mouse and rat.
 Gmor <- function(RatGenes){
   # This function retrieves mouse homolog associated gene names of Rat genes.
