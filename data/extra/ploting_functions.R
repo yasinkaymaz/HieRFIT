@@ -42,6 +42,7 @@ multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
 PlotTopo <- function(treeTable, ...){### Update with data.tree plotting
   library(data.tree)
   library(DiagrammeR)
+  treeTable <- data.frame(lapply(treeTable, function(x) {gsub("\\+|-|/", ".", x)}))
   treeTable$pathString <- apply(cbind("TaxaRoot", treeTable), 1, paste0, collapse="/")
   taxa <- as.Node(treeTable)
   SetGraphStyle(taxa, rankdir = "LR")

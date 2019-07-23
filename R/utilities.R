@@ -62,7 +62,7 @@ GetAncestPath <- function(tree, class){
 FixLab <- function(xstring){
   #Replace white space with '_'
   xstring <- gsub(xstring, pattern = " ", replacement = "_")
-  xstring <- gsub(xstring, pattern = "\\+|-", replacement = ".")
+  xstring <- gsub(xstring, pattern = "\\+|-|/", replacement = ".")
   xstring <- gsub(xstring, pattern = "`", replacement = "")
   return(xstring)
 }
@@ -142,7 +142,7 @@ RandomizeR <- function(df, n=10){
   dfRand <- dfRand[sample(rownames(dfRand),size = nrow(df)),]
   return(dfR)
 }
-#' Homology mapping via orhologous genes between mouse and rat.
+#' Homology mapping via orthologous genes between mouse and rat.
 Gmor <- function(RatGenes){
   # This function retrieves mouse homolog associated gene names of Rat genes.
   #library(biomaRt)
@@ -180,6 +180,34 @@ RAMmerger <- function(RatObj, MouseObj){
   return(ccaMergedMouseRat)
 }
 
+
+
+
+#' A function to determine the size of intersection between ancestors of True class and Predicted class
+#' @param t true class
+#' @param p predicted class
+EvalPred <- function(t, p, tree){
+  t <- FixLab(t)
+  p <- FixLab(p)
+  labs_l <- c(tree$tip.label, tree$node.label)
+  Node <- match(t, labs_l)
+  parent <- tree$edge[which(x = tree$edge[, 2] == Node), ][1]
+  Ancestors <- GetAncestPath(tree = tree, class = t)
+  if(any(grep(p, Ancestors))){
+    if(t == p){
+      out <- "Correct_leaf_node"
+    }else if(labs_l[parent] == p){
+      out <- "Correct_parent_node"
+    }else{
+      out <- "Correct_ancestral_node"
+    }
+  }else{
+    out <- "Incorrect_clade"
+  }
+  return(out)
+}
+
+
 #' A function to determine the size of intersection between ancestors of True class and Predicted class
 #' @param t true class
 #' @param p predicted class
@@ -193,7 +221,9 @@ IntSectSize <- function(t, p, tree){
 #' A function for Hierarchical Precision, Recall, and F-measure.
 #' @param tpT PriorPostTable: a table with two columns of which first is Prior and second is Post-prediction.
 #' @param tree tree topology in phylo format.
-hPRF <- function(tpT, tree, BetaSq=1){
+#' @param BetaSq Beta coefficient
+#' @param ND_term The label used for undetermined class types.
+hPRF <- function(tpT, tree, BetaSq=1, ND_term="Undetermined"){
   # To Do: Consider Undetermined class!
   tpT$Int <- apply(tpT, 1, function(x) IntSectSize(t = x[1], p = x[2], tree = tree))
   tpT$PiL <- apply(tpT, 1, function(x) length(GetAncestPath(tree = tree, class = FixLab(x[2]) )))
@@ -202,7 +232,19 @@ hPRF <- function(tpT, tree, BetaSq=1){
   hP <- sum(tpT$Int)/sum(tpT$PiL)
   hR <- sum(tpT$Int)/sum(tpT$TiL)
   hF <- (BetaSq+1)*hP*hR/(BetaSq*hP+hR)
-
-  return(c(Precision=hP, Recall=hR, Fmeasure=hF))
+  #Calculate ND rate
+  ND.rate <- dim(tpT[tpT[, 2] == ND_term, ])[1]/dim(tpT)[1]
+  #Filter out ND predictions
+  tpT.size <- dim(tpT)[1]
+  tpT <- tpT[tpT[, 2] != ND_term, ]
+  #Calculate correctness
+  metrics <- c("Correct_leaf_node", "Correct_parent_node", "Correct_ancestral_node", "Incorrect_clade")
+  tpT$Eval <- apply(tpT, 1, function(x) EvalPred(t = x[1], p = x[2], tree = tree) )
+  evals <- table(tpT$Eval)/tpT.size
+  mm <- metrics[!metrics %in% names(evals)]
+  mm.x <- rep(0, length(mm))
+  names(mm.x) <- mm
+  evals <- c(evals, mm.x)
+  evals <- evals[order(names(evals))]
+  return(c(Precision=hP, Recall=hR, Fmeasure=hF, evals, UndetectedRate=ND.rate))
 }
-

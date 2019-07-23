@@ -83,3 +83,20 @@ meta.data slot of the object will carry all class probailities as well as the fi
 3. Create local classifiers at each node,
 3. Combine local classifiers into a reference model,
 4. HieRFIT new data using reference.
+
+
+## Projecting cell types inter-species
+
+HieRFIT can take an argument "xSpecies" for inter-species cross projection of cell types. In this example below, we demonstrate how to use a HieR model, "refmodZr4" build on mouse brain single cell atlas to project cell type labels on to a rat single cell data. Using biomaRt package, we find the orthologous genes between two species.
+
+```{r}
+hippo006.HierObj <- HieRFIT(Query = as.matrix(hippo006@data), refMod = refmodZr4, xSpecies = "mouse2rat")
+```
+This command above also creates a dataframe called "ortoDict" and saves it in the global environment. This table can be fed into other HieRFIT runs using "ortoDict" argument, if same xSpecies is the case, to save time as follows:
+
+```{r}
+hippo006.HierObj <- HieRFIT(Query = as.matrix(hippo006@data),
+                            refMod = refmodZr4,
+                            xSpecies = "mouse2rat",
+                            ortoDict = ortoDict)
+```

@@ -28,6 +28,10 @@ CreateHieR <- function(RefData, ClassLabels, TreeTable=NULL, method="hrf", threa
 
     print("Training model... This may take some time... Please, be patient!")
 
+  try(if(!identical(sort(tree$tip.label),
+                   sort(unique(ClassLabels))))
+    stop("Please, check class labels in the reference and tree file."))
+
   model <- HieRandForest(RefData = RefData,
                          ClassLabels = ClassLabels,
                          tree, thread = thread, ...)
@@ -49,7 +53,7 @@ CreateTree <- function(treeTable){
   library(ape)#TRY REPLACING
   library(data.tree)# '::' doesn't work!
 
-  treeTable <- data.frame(lapply(treeTable, function(x) {gsub("\\+|-", ".", x)}))
+  treeTable <- data.frame(lapply(treeTable, function(x) {gsub("\\+|-|/", ".", x)}))
 
   treeTable$pathString <- apply(cbind("TaxaRoot", treeTable), 1, paste0, collapse="/")
   tree <- as.phylo(as.Node(treeTable))
@@ -136,8 +140,7 @@ NodeTrainer <- function(Rdata, tree, node, f_n=200, tree_n=500, ...){
                                        returnResamp = "none",
                                        allowParallel = TRUE,
                                        classProbs =  TRUE,
-                                       trim = TRUE,
-                                       sampling = "down")
+                                       trim = TRUE)
   node.mod <- caret::train(ClassLabels~.,
                            data = node.Data,
                            method = "rf",

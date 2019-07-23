@@ -32,11 +32,12 @@ HieMetrics <- setClass(Class = "HieMetrics",
 #' @param refMod optional input if model exist already. Default is null and generated from scratch. Input can be an caret model object or a .Rdata file.
 #' @param Prior prior class labels if exist. For cross comparison. Should correspond row order of the Query.
 #' @param xSpecies optional argument to specify cross species information transfer. Default is null. Possible options are 'rat2mouse', 'mouse2rat', 'mouse2human', human2mouse. With respect to model data.
+#' @param ortoDict optional argument to specify an existing orthology gene table for inter-species projection. Can be used to avoid re-running Biomart query which takes time.
 #' @keywords
 #' @export
 #' @usage expRefObj <- get(load("data/exp_refObj.Rdata"))
 #' @usage cpo <- HieRFIT(Query = as.matrix(pbmc1@data), refMod = expRefobj)
-HieRFIT <- function(Query, refMod, Prior=NULL, xSpecies=NULL, alpha=.9){
+HieRFIT <- function(Query, refMod, Prior=NULL, xSpecies=NULL, ortoDict=NULL, alpha=.9){
 
   if (class(Query) == "seurat" | class(Query) == "Seurat" ){
     Query_d <- as.matrix(Query@data)}else{Query_d <- Query}
@@ -45,10 +46,15 @@ HieRFIT <- function(Query, refMod, Prior=NULL, xSpecies=NULL, alpha=.9){
 
   if( !is.null(xSpecies)) {
     if(xSpecies == "mouse2rat"){ ## pay attention! flipped logic.
-      print("Rat to mouse gene id conversion...")
-      ort <- Gmor(RatGenes = rownames(Query_d))
-      Query_d <- Query_d[which(rownames(Query_d) %in% ort$external_gene_name), ]
-      rownames(Query_d) <- ort[match(rownames(Query_d), ort$external_gene_name),]$mmusculus_homolog_associated_gene_name
+      if(is.null(ortoDict)){
+        print("Rat to mouse gene id conversion...")
+        ortoDict <- Gmor(RatGenes = rownames(Query_d))
+        assign("ortoDict", ortoDict, .GlobalEnv)
+      }
+      ortoDict$external_gene_name <- FixLab(ortoDict$external_gene_name)
+      ortoDict$mmusculus_homolog_associated_gene_name <- FixLab(ortoDict$mmusculus_homolog_associated_gene_name)
+      Query_d <- Query_d[which(rownames(Query_d) %in% ortoDict$external_gene_name), ]
+      rownames(Query_d) <- ortoDict[match(rownames(Query_d), ortoDict$external_gene_name),]$mmusculus_homolog_associated_gene_name
     }
   }
   if(refMod@modtype == "hrf"){
