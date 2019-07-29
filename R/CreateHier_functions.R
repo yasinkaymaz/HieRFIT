@@ -7,7 +7,7 @@
 RefMod <- setClass(Class = "RefMod",
                    slots = c(model = "list",
                              tree = "list",
-                             modtype = "character"))
+                             modtype = "character"))#Add treeTable
 
 #' The main function for creating a reference model.
 #' @param RefData Reference data from which class labels will be projected on Query data.

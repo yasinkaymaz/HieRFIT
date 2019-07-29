@@ -21,6 +21,33 @@ NodePredictorImportance <- function(treeTable, RefMod){
 }
 
 
+ExtractHierModfeatures <- function(RefMod){
+  node.list <- DigestTree(tree = RefMod@tree[[1]])
+  Tufs <- NULL
+  for(i in node.list){
+    Tufs <- c(Tufs, RefMod@model[[as.character(i)]]$finalModel$xNames)
+  }
+  Tufs <- unique(Tufs)
+  return(Tufs)
+}
+
+SaveHieRMod <- function(refMod, fileName="Reference.HierMod"){
+  lapply(refMod@model,
+    function(x) rm(list=ls(envir = attr(x$terms, ".Environment")),
+    envir = attr(x$terms, ".Environment")))
+  lapply(refMod@model,
+    function(x) environment(x$terms) <- NULL)
+  saveRDS(refMod, file = paste(fileName,".RDS", sep = ""))
+}
+
+LoadHieRMod <- function(fileName){
+  refMod <- readRDS(file = fileName)
+  lapply(refMod@model,
+    function(x) attr(x$terms, ".Environment") <- globalenv() )
+  return(refMod)
+}
+
+
 #' A function to retrieve corresponding leafs of the child nodes of a given node.
 #' @param tree A tree storing relatinship between the class labels.
 #' @param node a particular non-terminal node in the tree.
@@ -131,7 +158,7 @@ EvaluateCertainty <- function(RefSeuObj, IdentityCol, RefMod, Uinter=20, perm_n=
 }
 
 RandomizeR <- function(df, n=10){
-  #set.seed(192939)
+  set.seed(192939)
   dfRand <- NULL
   for (i in 1:n){
     dfR <- df[sample(nrow(df)), sample(ncol(df))]
@@ -140,7 +167,7 @@ RandomizeR <- function(df, n=10){
     dfRand <- rbind(dfRand, dfR)
   }
   dfRand <- dfRand[sample(rownames(dfRand),size = nrow(df)),]
-  return(dfR)
+  return(dfRand)
 }
 #' Homology mapping via orthologous genes between mouse and rat.
 Gmor <- function(RatGenes){

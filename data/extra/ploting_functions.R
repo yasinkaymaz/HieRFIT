@@ -48,10 +48,12 @@ PlotTopo <- function(treeTable, ...){### Update with data.tree plotting
   SetGraphStyle(taxa, rankdir = "LR")
   #SetGraphStyle(taxa, rankdir = "TB")
   SetEdgeStyle(taxa, arrowhead = "vee", color = "grey35", penwidth = "2px")
-  SetNodeStyle(taxa, style = "filled,rounded",
-               shape = "box", fillcolor = "LightBlue",
-               fontname = "helvetica", fontcolor="black",
-               tooltip = GetDefaultTooltip, width=3)
+  # SetNodeStyle(taxa, style = "filled,rounded",
+  #              shape = "box", fillcolor = "LightBlue",
+  #              fontname = "helvetica", fontcolor="black",
+  #              tooltip = GetDefaultTooltip, width=3)
+  taxa$Do(function(node) SetNodeStyle(node, shape = "box", fillcolor = "chocolate2",style = "filled,rounded",fontname = "helvetica", fontcolor="black",tooltip = GetDefaultTooltip, width=3), filterFun = isNotLeaf)
+  taxa$Do(function(node) SetNodeStyle(node, shape = "egg", fillcolor = "green",style = "filled,rounded",fontname = "helvetica", fontcolor="black",tooltip = GetDefaultTooltip, width=3), filterFun = isLeaf)
 
   pp <- plot(taxa, direction = "descend")
 
@@ -59,6 +61,48 @@ PlotTopo <- function(treeTable, ...){### Update with data.tree plotting
   #ape::plot.phylo(x = tree, direction = "downwards", show.node.label = TRUE)
   #ape::nodelabels()
 }
+
+PlotTopoStats <- function(treeTable, Projections, aggregate=TRUE,...){### Update with data.tree plotting
+  library(data.tree)
+  library(DiagrammeR)
+  treeTable <- data.frame(lapply(treeTable, function(x) {gsub("\\+|-|/", ".", x)}))
+  treeTable$pathString <- apply(cbind("TaxaRoot", treeTable), 1, paste0, collapse="/")
+  taxa <- as.Node(treeTable)
+  SetGraphStyle(taxa, rankdir = "LR")
+  #SetGraphStyle(taxa, rankdir = "TB")
+  SetEdgeStyle(taxa, arrowhead = "vee", color = "grey35", penwidth = "2px")
+
+  freq <- table(Projections)
+  freq <- round(freq*100/sum(freq),digits = 1)
+  Rand <- function(x){
+  aa <- FixLab(xstring = x$name)
+  freq[aa]
+  }
+  countPct <- as.character(taxa$Get(Rand))
+  countPct[is.na(countPct)] <- '0'
+  countPct <- as.integer(countPct)
+  taxa$Set(Perct=countPct)
+  if(aggregate){
+    taxa$Do(function(node) node$Perct <- node$Perct + Aggregate(node, attribute = "Perct", aggFun = sum), filterFun = isNotLeaf, traversal = "post-order")
+  }
+  cols <- colorRampPalette(c("white", "green"))(101)
+  SetNodeStyle(taxa,
+               style = "filled,rounded",
+               shape = "box",
+               label = function(node) paste(node$name,"\n", node$Perct,"%",sep=""),
+               fillcolor = function(node) cols[as.integer(node$Perct)+1],
+               fontname = "helvetica",
+               fontcolor = "black",
+               tooltip = function(node) paste(node$Perct,"%"),
+               width=3)
+  pp <- plot(taxa, direction = "descend")
+
+  return(pp)
+  #ape::plot.phylo(x = tree, direction = "downwards", show.node.label = TRUE)
+  #ape::nodelabels()
+}
+
+
 
 PlotProjectionStats <- function(SeuratObject, outputFilename="plotpredictions") {
   pdf(paste(outputFilename,".pdf",sep=""),width= 12, height = 8)

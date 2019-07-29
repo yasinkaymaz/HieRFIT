@@ -10,6 +10,7 @@ ParApp <- function() {
 }
 
 
+
 #' This function calculates a scaled Kullback-Leibler divergence
 #' @param probs a list of observed probability scores.
 #' @return KLscaled = KLe/KLmax, where KLe is the empirical divergence given
