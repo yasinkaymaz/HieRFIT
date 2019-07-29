@@ -198,6 +198,7 @@ ceR <- function(qP, qW){
   QueCers <- NULL
   qL <- qP > qW
   qL <- ifelse(qL == TRUE, 1, -1)
+  rownames(qW) <- rownames(qP)#Otherwise, duplicate rownames of qW gives error.
   QueCers <- (qL*(qP-qW)^2)/( ((1-2*qW)*qP)+qW^2 )
   colnames(QueCers) <- colnames(qP)
   QueCers <- as.data.frame(QueCers)
