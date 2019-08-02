@@ -214,22 +214,50 @@ RAMmerger <- function(RatObj, MouseObj){
 #' @param t true class
 #' @param p predicted class
 EvalPred <- function(t, p, tree){
+  #Fix the label characters:
   t <- FixLab(t)
   p <- FixLab(p)
+  #make a list of node indexes of the entire tree:
   labs_l <- c(tree$tip.label, tree$node.label)
-  Node <- match(t, labs_l)
-  parent <- tree$edge[which(x = tree$edge[, 2] == Node), ][1]
+  #look up the index of prior(t) and predicted(p) labels:
+  Node.t <- match(t, labs_l)
+  Node.p <- match(p, labs_l)
+  #look up the parent node indexes of prior(t) and predicted(p) label indexes:
+  parent.t <- tree$edge[which(x = tree$edge[, 2] == Node.t), ][1]
+  parent.p <- tree$edge[which(x = tree$edge[, 2] == Node.p), ][1]
+  #extract the list of children node indexes: #can be multiple children.
+  children <- tree$edge[which(x = tree$edge[, 1] == Node.t), 2]
+
+  if(t %in% tree$node.label){#if the prior node label is an internal node not a leaf.
+  #extract the grandChildren node labels if exist.
+  grandChilds <- c(ape::extract.clade(tree, t)$node.label, ape::extract.clade(tree, t)$tip.label)
+  #Exclude children and self node labels.
+  grandChilds <- grandChilds[!grandChilds %in% c(t, labs_l[children])]
+  }else{
+    grandChilds <- NULL
+  }
+  #Look up entire path for ancestors. This returns node index and node labels concatinated: e.g. "8B" "7A"
   Ancestors <- GetAncestPath(tree = tree, class = t)
-  if(any(grep(p, Ancestors))){
+  if(is.na(Node.p) || is.na(Node.t)){
+    out <- "NotDefined"
+  }else if(any(grep(p, Ancestors))){
     if(t == p){
-      out <- "Correct_leaf_node"
-    }else if(labs_l[parent] == p){
+      out <- "Correct_node"
+    }else if(labs_l[parent.t] == p){
       out <- "Correct_parent_node"
     }else{
       out <- "Correct_ancestral_node"
     }
   }else{
+    if(parent.t == parent.p){
+      out <- "Correct_sibling_node"
+    }else if(Node.p %in% children){
+      out <- "Correct_children_node"
+    }else if(p %in% grandChilds){
+      out <- "Correct_grandchildren_node"
+    }else{
     out <- "Incorrect_clade"
+    }
   }
   return(out)
 }
@@ -265,7 +293,9 @@ hPRF <- function(tpT, tree, BetaSq=1, ND_term="Undetermined"){
   tpT.size <- dim(tpT)[1]
   tpT <- tpT[tpT[, 2] != ND_term, ]
   #Calculate correctness
-  metrics <- c("Correct_leaf_node", "Correct_parent_node", "Correct_ancestral_node", "Incorrect_clade")
+  metrics <- c("Correct_node", "Correct_parent_node", "Correct_ancestral_node",
+  "Correct_sibling_node", "Correct_children_node", "Correct_grandchildren_node",
+  "Incorrect_clade", "NotDefined")
   tpT$Eval <- apply(tpT, 1, function(x) EvalPred(t = x[1], p = x[2], tree = tree) )
   evals <- table(tpT$Eval)/tpT.size
   mm <- metrics[!metrics %in% names(evals)]

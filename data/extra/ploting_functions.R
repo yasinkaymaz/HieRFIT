@@ -73,6 +73,7 @@ PlotTopoStats <- function(treeTable, Projections, aggregate=TRUE,...){### Update
   SetEdgeStyle(taxa, arrowhead = "vee", color = "grey35", penwidth = "2px")
 
   freq <- table(Projections)
+  names(freq) <- FixLab(xstring = names(freq))
   freq <- round(freq*100/sum(freq),digits = 1)
   Rand <- function(x){
   aa <- FixLab(xstring = x$name)
@@ -80,7 +81,7 @@ PlotTopoStats <- function(treeTable, Projections, aggregate=TRUE,...){### Update
   }
   countPct <- as.character(taxa$Get(Rand))
   countPct[is.na(countPct)] <- '0'
-  countPct <- as.integer(countPct)
+  countPct <- as.numeric(countPct)
   taxa$Set(Perct=countPct)
   if(aggregate){
     taxa$Do(function(node) node$Perct <- node$Perct + Aggregate(node, attribute = "Perct", aggFun = sum), filterFun = isNotLeaf, traversal = "post-order")
@@ -90,7 +91,7 @@ PlotTopoStats <- function(treeTable, Projections, aggregate=TRUE,...){### Update
                style = "filled,rounded",
                shape = "box",
                label = function(node) paste(node$name,"\n", node$Perct,"%",sep=""),
-               fillcolor = function(node) cols[as.integer(node$Perct)+1],
+               fillcolor = function(node) cols[as.numeric(node$Perct)+1],
                fontname = "helvetica",
                fontcolor = "black",
                tooltip = function(node) paste(node$Perct,"%"),
