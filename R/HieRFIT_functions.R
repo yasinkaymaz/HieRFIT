@@ -63,7 +63,7 @@ HieRFIT <- function(Query, refMod, Prior=NULL, xSpecies=NULL, ortoDict=NULL, alp
     P_path_prod <- Predictor(model = refMod@model[[1]], Query = Query_d)
   }
   #Evaluate scores and run uncertainty function, then, project the class labels.
-  ScoreEvals <- ScoreEval(ScoreObs = HieMetObj@Scores, ProbCert = HieMetObj@QueCers, alpha=alpha)
+  ScoreEvals <- ScoreEval(ScoreObs = HieMetObj@Scores, tree=refMod@model[[1]], ProbCert = HieMetObj@QueCers, alpha=alpha)
 
   if (class(Query) == "seurat" | class(Query) == "Seurat" ){
     Query@meta.data <- cbind(Query@meta.data[, which(!colnames(Query@meta.data) %in% colnames(ScoreEvals))],
@@ -183,7 +183,8 @@ graWeighteR <- function(model, QueData){
   #Randomizing only feature space
   QueData_R <- RandomizeR(df = QueData, n = 10)
   pvts_R <- PvoteR(model = model, QueData = QueData_R)
-  Ws <- apply(pvts_R, 2, mean) + apply(pvts_R, 2, sd)
+  #Ws <- apply(pvts_R, 2, mean) + apply(pvts_R, 2, sd)
+  Ws <- apply(pvts_R, 2, mean)
   #Ws <- colMeans(PvoteR(model = model, QueData = QueData_R))
   QueWeights <- t(as.data.frame(Ws))[rep(1, each=nrow(QueData)), ]
   QueWeights <- as.data.frame(QueWeights)
@@ -228,14 +229,37 @@ scoR <- function(model, QueData, format="prob", node=NULL){
   return(QuePred)
 }
 
+#' A function to find the full path of all true ancestors:
+#' @param PCertVector Probability certainty table.
+#' @param tree a tree topology with which hrf model was trained on. 'phylo' format.
+CandidateDetector <- function(PCertVector, tree){
+
+  labs_l <- c(tree$tip.label, tree$node.label)#The order is important! tips first. Don't change!#New
+  labs_l <- labs_l[!labs_l %in% "TaxaRoot"] #Double-check#New
+  Path_nodes_of_candits <- NULL
+  CandidNodes <- NULL
+  for(node.lab in labs_l){
+    AncPath <- GetAncestPath(tree = tree, class = node.lab, labels = T)
+    if(all(as.logical(PCertVector[AncPath])) & !(AncPath[1] %in% Path_nodes_of_candits)){
+      CandidNodes <- c(CandidNodes, AncPath[1])
+      Path_nodes_of_candits <- unique(c(Path_nodes_of_candits, AncPath[2:length(AncPath)]))
+    }
+  }
+  return(CandidNodes[!CandidNodes %in% Path_nodes_of_candits])
+}
+
 #' A function for evalating the uncertainty.
 #' @param ScoreObs P_path_prod for observed scores
 #' @param ProbCert Certainty scores.
-ScoreEval <- function(ScoreObs, ProbCert, alpha=.9){
+#' @param tree a tree topology with which hrf model was trained on. 'phylo' format.
+ScoreEval <- function(ScoreObs, ProbCert, tree, alpha=0){
+
+  ProbCert <- ProbCert > alpha#New
 
   df <- data.frame(row.names = rownames(ScoreObs))
   for(i in 1:length(ProbCert[,1])){
-    candits <- colnames(ProbCert)[ProbCert[i,] > alpha]
+    #candits <- colnames(ProbCert)[ProbCert[i,] > alpha]
+    candits <- CandidateDetector(PCertVector = ProbCert[i,], tree=tree)
     if(length(candits) == 0){
       classL <- "Undetermined"
       classU <- max(ProbCert[i,])

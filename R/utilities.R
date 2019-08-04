@@ -70,13 +70,17 @@ GetChildNodeLeafs <- function(tree, node){
   return(c.tips)
 }
 
-GetAncestPath <- function(tree, class){
+GetAncestPath <- function(tree, class, labels=FALSE){
   path <- c()
   labs_l <- c(tree$tip.label, tree$node.label)
   Node <- match(class, labs_l)
   parent <- tree$edge[which(x = tree$edge[, 2] == Node), ][1]
   while(!is.na(parent)){
-    path <- c(path, paste(parent, class, sep = ""))
+    if(labels){
+    path <- c(path, class)
+    }else{
+      path <- c(path, paste(parent, class, sep = ""))
+    }
     class <- labs_l[parent]
     parent <- tree$edge[which(x = tree$edge[, 2] == parent), ][1]
   }
