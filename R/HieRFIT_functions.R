@@ -63,7 +63,7 @@ HieRFIT <- function(Query, refMod, Prior=NULL, xSpecies=NULL, ortoDict=NULL, alp
     P_path_prod <- Predictor(model = refMod@model[[1]], Query = Query_d)
   }
   #Evaluate scores and run uncertainty function, then, project the class labels.
-  ScoreEvals <- ScoreEval(ScoreObs = HieMetObj@Scores, tree=refMod@model[[1]], ProbCert = HieMetObj@QueCers, alpha=alpha)
+  ScoreEvals <- ScoreEval(ScoreObs = HieMetObj@Scores, tree=refMod@tree[[1]], ProbCert = HieMetObj@QueCers, alpha=alpha)
 
   if (class(Query) == "seurat" | class(Query) == "Seurat" ){
     Query@meta.data <- cbind(Query@meta.data[, which(!colnames(Query@meta.data) %in% colnames(ScoreEvals))],
@@ -183,8 +183,8 @@ graWeighteR <- function(model, QueData){
   #Randomizing only feature space
   QueData_R <- RandomizeR(df = QueData, n = 10)
   pvts_R <- PvoteR(model = model, QueData = QueData_R)
-  #Ws <- apply(pvts_R, 2, mean) + apply(pvts_R, 2, sd)
-  Ws <- apply(pvts_R, 2, mean)
+  Ws <- apply(pvts_R, 2, mean) + apply(pvts_R, 2, sd)
+  #Ws <- apply(pvts_R, 2, mean)
   #Ws <- colMeans(PvoteR(model = model, QueData = QueData_R))
   QueWeights <- t(as.data.frame(Ws))[rep(1, each=nrow(QueData)), ]
   QueWeights <- as.data.frame(QueWeights)
@@ -254,12 +254,12 @@ CandidateDetector <- function(PCertVector, tree){
 #' @param tree a tree topology with which hrf model was trained on. 'phylo' format.
 ScoreEval <- function(ScoreObs, ProbCert, tree, alpha=0){
 
-  ProbCert <- ProbCert > alpha#New
+  ProbCert.logic <- ProbCert > alpha#New
 
   df <- data.frame(row.names = rownames(ScoreObs))
   for(i in 1:length(ProbCert[,1])){
     #candits <- colnames(ProbCert)[ProbCert[i,] > alpha]
-    candits <- CandidateDetector(PCertVector = ProbCert[i,], tree=tree)
+    candits <- CandidateDetector(PCertVector = ProbCert.logic[i,], tree=tree)
     if(length(candits) == 0){
       classL <- "Undetermined"
       classU <- max(ProbCert[i,])
