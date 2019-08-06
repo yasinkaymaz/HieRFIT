@@ -121,7 +121,13 @@ PlotProjectionStats <- function(SeuratObject, outputFilename="plotpredictions") 
   p <- ggplot(data=SeuratObject@meta.data)+
     geom_boxplot(aes(x=Projection,y=Score,fill=Projection))+
     theme(axis.text.x = element_text(angle = 90, hjust = 1),legend.position="right")+
-    labs(y="Classification Score - max(Sij(x))",title=paste("Prediction outcome", sep=""))
+    labs(y="Classification Score",title=paste("Prediction outcome", sep=""))
+  print(p)
+
+  p <- ggplot(data=SeuratObject@meta.data)+
+    geom_boxplot(aes(x=Projection,y=Certainty,fill=Projection))+
+    theme(axis.text.x = element_text(angle = 90, hjust = 1),legend.position="right")+
+    labs(y="Classification Certainty",title=paste("Prediction outcome", sep=""))
   print(p)
 
   dev.off()

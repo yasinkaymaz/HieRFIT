@@ -109,18 +109,23 @@ CVRunner <- function(Ref, ClassLabels, TreeTable=NULL, cv_k=5, method="hrf"){
                               trainClassLabels <- ClassLabels[-flds[[1]]]
                               trainRef <- Ref[, -flds[[1]]]
 
-                              refmod <- CreateHieR(RefData = trainRef,
+                              refmod <- CreateHieR(Ref = trainRef,
                                                    ClassLabels = trainClassLabels,
                                                    TreeTable = TreeTable)
                               #Hierfit
                               testClassLables <- ClassLabels[flds[[1]]]
                               testRef <- Ref[, flds[[1]]]
+
+
                               testObj <- HieRFIT(Query = testRef, refMod = refmod, Prior = testClassLables)
                               PriorPostTable <- data.frame(Prior=testObj@Prior, Projection = testObj@Evaluation$Projection)
                               hPRF.out <- hPRF(tpT = PriorPostTable, tree = refmod@tree[[1]])
-                              hPRF.out <- c(CV_k=i,
+                              hPRF.out <- c(Tool="HieRFIT",
+                                            CV_k=i,
                                             hPRF.out,
                                             Undetermined=nrow(PriorPostTable[PriorPostTable$Projection == "Undetermined",])/length(PriorPostTable[,1]))
+
+
                               print(hPRF.out)
                               cc <- t(hPRF.out)
                               return(cc)

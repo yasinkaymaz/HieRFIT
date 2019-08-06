@@ -181,9 +181,10 @@ PvoteR <- function(model, QueData, format="prob", node=NULL){
 #' @return QueWeights a set of probability weightes per class to be used in asymetrix entropy estimations.
 graWeighteR <- function(model, QueData){
   #Randomizing only feature space
-  QueData_R <- RandomizeR(df = QueData, n = 10)
+  QueData_R <- RandomizeR(df = QueData, n = 20)
   pvts_R <- PvoteR(model = model, QueData = QueData_R)
   Ws <- apply(pvts_R, 2, mean) + apply(pvts_R, 2, sd)
+  #Ws <- apply(pvts_R, 2, mean) + apply(pvts_R, 2, sd)/sqrt(dim(pvts_R)[1])
   #Ws <- apply(pvts_R, 2, mean)
   #Ws <- colMeans(PvoteR(model = model, QueData = QueData_R))
   QueWeights <- t(as.data.frame(Ws))[rep(1, each=nrow(QueData)), ]
@@ -248,18 +249,40 @@ CandidateDetector <- function(PCertVector, tree){
   return(CandidNodes[!CandidNodes %in% Path_nodes_of_candits])
 }
 
+#' A function to find the full path of all true ancestors:
+#' @param PCertVector Probability certainty table.
+#' @param tree a tree topology with which hrf model was trained on. 'phylo' format.
+CandidateDetector2 <- function(PCertVector, tree, alpha=0){
+  labs_l <- c(tree$tip.label, tree$node.label)#The order is important! tips first. Don't change!#New
+  labs_l <- labs_l[!labs_l %in% "TaxaRoot"] #Double-check#New
+  Path_nodes_of_candits <- NULL
+  CandidNodes <- NULL
+  for(node.lab in labs_l){
+    AncPath <- GetAncestPath(tree = tree, class = node.lab, labels = T)
+    if( (mean(as.numeric(PCertVector[AncPath])) > alpha) &
+        !(AncPath[1] %in% Path_nodes_of_candits) &
+        (as.numeric(PCertVector[AncPath[1]]) > alpha)
+        ){
+      CandidNodes <- c(CandidNodes, AncPath[1])
+      Path_nodes_of_candits <- unique(c(Path_nodes_of_candits, AncPath[2:length(AncPath)]))
+    }
+  }
+  return(CandidNodes)
+}
+
 #' A function for evalating the uncertainty.
 #' @param ScoreObs P_path_prod for observed scores
 #' @param ProbCert Certainty scores.
 #' @param tree a tree topology with which hrf model was trained on. 'phylo' format.
 ScoreEval <- function(ScoreObs, ProbCert, tree, alpha=0){
 
-  ProbCert.logic <- ProbCert > alpha#New
+  #ProbCert.logic <- ProbCert > alpha#New
 
   df <- data.frame(row.names = rownames(ScoreObs))
   for(i in 1:length(ProbCert[,1])){
     #candits <- colnames(ProbCert)[ProbCert[i,] > alpha]
-    candits <- CandidateDetector(PCertVector = ProbCert.logic[i,], tree=tree)
+    #candits <- CandidateDetector(PCertVector = ProbCert.logic[i,], tree=tree)
+    candits <- CandidateDetector2(PCertVector = ProbCert[i,], tree=tree, alpha=alpha)
     if(length(candits) == 0){
       classL <- "Undetermined"
       classU <- max(ProbCert[i,])
