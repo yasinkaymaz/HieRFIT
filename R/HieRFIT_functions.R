@@ -293,6 +293,7 @@ ScoreEval <- function(ScoreObs, ProbCert, tree, alpha=0){
       classS <- ScoreObs[i,classL]
     }else{
       classL <- colnames(ScoreObs[i,candits])[apply(ScoreObs[i,candits], 1, which.max)]
+      #classL <- colnames(ProbCert[i,candits])[apply(ProbCert[i,candits], 1, which.max)]
       classU <- ProbCert[i,classL]
       classS <- ScoreObs[i,classL]
     }

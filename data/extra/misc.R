@@ -262,7 +262,11 @@ DownSizeSeurat <- function(SeuratObj, IdentityCol, min_n=NULL){
       cells <- c(cells, sample(rownames(SeuratObj@meta.data[which(SeuratObj@meta.data[,IdentityCol] == type), ]), size = classes[type], replace = F))
     }
   }
-  downSobj <- SubsetData(object = SeuratObj, cells.use = cells, do.clean=T)
+  if(class(SeuratObj)[1] == "seurat"){
+    downSobj <- SubsetData(object = SeuratObj, cells.use = cells, do.clean=T)
+  }else if(class(SeuratObj)[1] == "Seurat"){
+    downSobj <- subset(x = SeuratObj, cells = cells)
+  }
   return(downSobj)
 }
 
