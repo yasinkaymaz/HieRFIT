@@ -111,11 +111,6 @@ CTTraverser <- function(Query, tree, hiemods, thread=NULL){
                                  nrow = length(colnames(Query))))
       colnames(mp_df) <- mp
       nodeQueData <- cbind(nodeQueData, mp_df)
-      #Calculate node Scores:
-      nodeScores <- scoR(model = nodeModel,
-                         format = "prob",
-                         QueData = nodeQueData,
-                         node = i)
 
       #Tally votes for class from the local model:
       nodePvotes <- PvoteR(model = nodeModel, QueData = nodeQueData)
@@ -123,6 +118,13 @@ CTTraverser <- function(Query, tree, hiemods, thread=NULL){
       nodeQueWs <- graWeighteR(model = nodeModel, QueData = nodeQueData )
       #Estimate Certainty of prediction probabilities per class:
       nodeQueCers <- ceR(qP = nodePvotes, qW = nodeQueWs)
+      #Calculate node Scores:
+      #nodeScores <- scoR(model = nodeModel,
+      #                   format = "prob",
+      #                   QueData = nodeQueData,
+      #                   node = i)
+      nodeScores <- nodePvotes/nodeQueWs
+      colnames(nodeScores) <- paste(i, colnames(nodeScores), sep = "")
 
       Scores <- cbind(Scores, nodeScores)
       Pvotes <- cbind(Pvotes, nodePvotes)
@@ -207,7 +209,7 @@ ceR <- function(qP, qW){
   return(QueCers)
 }
 
-#' The predictor function.
+#' The predictor function. REDUNDANT!!!
 #' @param model
 #' @param QueData
 #' @param format type of prediction output, "prob" or "resp".
