@@ -95,7 +95,8 @@ CTTraverser <- function(Query, tree, hiemods, thread=NULL){
   Pvotes <- data.frame(row.names = colnames(Query))
   QueWs <- data.frame(row.names = colnames(Query))
   QueCers <- data.frame(row.names = colnames(Query))
-
+  fi=node.list[length(node.list)]+1
+  node.list <- c(node.list, fi)
   if(is.null(thread)){
     for(i in node.list){
       #nodeModel <- hiemods[[as.character(i)]][[1]]
@@ -125,13 +126,15 @@ CTTraverser <- function(Query, tree, hiemods, thread=NULL){
       #                   node = i)
       nodeScores <- nodePvotes/nodeQueWs
       colnames(nodeScores) <- paste(i, colnames(nodeScores), sep = "")
-
       Scores <- cbind(Scores, nodeScores)
-      Pvotes <- cbind(Pvotes, nodePvotes)
-      QueWs <- cbind(QueWs, nodeQueWs)
-      QueCers <- cbind(QueCers, nodeQueCers)
+      if(i != fi){
+        Pvotes <- cbind(Pvotes, nodePvotes)
+        QueWs <- cbind(QueWs, nodeQueWs)
+        QueCers <- cbind(QueCers, nodeQueCers)
+      }
     } #closes the for loop.
-    S_path_prod <- ClassProbCalculator(tree = tree, nodes_P_all = Scores)
+    #S_path_prod <- ClassProbCalculator(tree = tree, nodes_P_all = Scores)
+    S_path_prod <- ClassProbCalculator2(tree = tree, nodes_P_all = Scores)
     HieMetrxObj <- new(Class = "HieMetrics",
                        Pvotes = Pvotes,
                        QueWs = QueWs,
@@ -321,6 +324,26 @@ ClassProbCalculator <- function(tree, nodes_P_all){
       nt_prob <- data.frame(apply(nodes_P_all[, map], 1, prod))
     }else{
       nt_prob <- data.frame(nodes_P_all[,map])
+    }
+    colnames(nt_prob) <- cl
+    P_path_prod <- cbind(P_path_prod, nt_prob)
+  }
+  return(P_path_prod)
+}
+
+ClassProbCalculator2 <- function(tree, nodes_P_all){
+  P_path_prod <- data.frame(row.names = rownames(nodes_P_all))
+  clabs <- c(tree$tip.label, tree$node.label)[tree$edge[, 2]]
+  fi=length(c(tree$tip.label, tree$node.label))+1
+  for(cl in clabs){
+    map <- GetAncestPath(tree = tree, class = cl)
+    if(cl %in% tree$tip.label){
+      map <- c(map, paste(fi, cl, sep = ""))
+    }
+    if(length(map) > 1){
+      nt_prob <- data.frame(apply(nodes_P_all[, map], 1, prod))
+    }else{
+      nt_prob <- data.frame(nodes_P_all[, map])
     }
     colnames(nt_prob) <- cl
     P_path_prod <- cbind(P_path_prod, nt_prob)
