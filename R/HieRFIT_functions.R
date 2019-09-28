@@ -188,9 +188,9 @@ graWeighteR <- function(model, QueData){
   #Randomizing only feature space
   QueData_R <- RandomizeR(df = QueData, n = 20)
   pvts_R <- PvoteR(model = model, QueData = QueData_R)
-  Ws <- apply(pvts_R, 2, mean) + apply(pvts_R, 2, sd)
+  #Ws <- apply(pvts_R, 2, mean) + apply(pvts_R, 2, sd)
   #Ws <- apply(pvts_R, 2, mean) + apply(pvts_R, 2, sd)/sqrt(dim(pvts_R)[1])
-  #Ws <- apply(pvts_R, 2, mean)
+  Ws <- apply(pvts_R, 2, mean)
   #Ws <- colMeans(PvoteR(model = model, QueData = QueData_R))
   QueWeights <- t(as.data.frame(Ws))[rep(1, each=nrow(QueData)), ]
   QueWeights <- as.data.frame(QueWeights)
@@ -265,8 +265,8 @@ CandidateDetector2 <- function(PCertVector, tree, alpha=0){
   for(node.lab in labs_l){
     AncPath <- GetAncestPath(tree = tree, class = node.lab, labels = T)
     if( (mean(as.numeric(PCertVector[AncPath])) > alpha) &
-        !(AncPath[1] %in% Path_nodes_of_candits) &
-        (as.numeric(PCertVector[AncPath[1]]) > alpha)
+        !(AncPath[1] %in% Path_nodes_of_candits) #&
+        #(as.numeric(PCertVector[AncPath[1]]) > alpha)
         ){
       CandidNodes <- c(CandidNodes, AncPath[1])
       Path_nodes_of_candits <- unique(c(Path_nodes_of_candits, AncPath[2:length(AncPath)]))

@@ -130,11 +130,14 @@ NodeTrainer <- function(Rdata, tree, node, f_n=200, tree_n=500, ...){
   node.Data <- droplevels(subset(node.Data, select=-c(ClassLabels)))
   node.Data <- node.Data[, apply(node.Data, 2, var) != 0]
 
-  P_dict <- FeatureSelector(Data = node.Data,
+  # P_dict <- FeatureSelector(Data = node.Data,
+  #                           ClassLabels = node.ClassLabels,
+  #                           num = f_n,
+  #                           ...)
+  P_dict <- FeatureSelector2(Data = node.Data,
                             ClassLabels = node.ClassLabels,
                             num = f_n,
                             ...)
-
   node.Data <- droplevels(subset(node.Data, select=c(P_dict)))
   node.Data$ClassLabels <- node.ClassLabels
 
@@ -216,6 +219,44 @@ FeatureSelector <- function(Data, ClassLabels, PC_n = 40, num = 200, ...) {
   }
   return(pick.rot)
 }
+
+
+FeatureSelector2 <- function(Data, ClassLabels, num = 200, ...) {
+  cls <- levels(ClassLabels)
+  Data.cl <- data.frame(Data, ClassLabels = ClassLabels)
+  ptab <- NULL
+  for(i in names(Data)){
+    fea.stats <- NULL
+    if(length(cls) > 0){# Do this if only more than 2 classes exist. Redundant
+      for(c in cls){
+        p.cl <- wilcox.test(Data.cl[Data.cl$ClassLabels == c, i],
+                            Data.cl[Data.cl$ClassLabels != c, i])$p.value
+        fea.stats <- c(fea.stats, p.cl)
+      }
+      names(fea.stats) <- cls
+    }else{
+      c <- cls[1]
+      p.cl <- wilcox.test(Data.cl[Data.cl$ClassLabels == c, i],
+                          Data.cl[Data.cl$ClassLabels != c, i])$p.value
+      fea.stats <- c(fea.stats, p.cl)
+      names(fea.stats) <- c
+    }
+    fea.stats <- as.data.frame(t(fea.stats))
+    rownames(fea.stats) <- i
+    ptab <- rbind(ptab, fea.stats)
+  }
+
+  pick.fea <- NULL
+  for(c in names(ptab)){
+    fea.p <- ptab[order(abs(ptab[, c]), decreasing = FALSE), ]
+    #exclude already selected variables.
+    fea.p <- fea.p[!rownames(fea.p) %in% pick.fea,]
+    #select top N variables. N is proportional to each class.
+    pick.fea <- c(pick.fea, rownames(head(fea.p, round(num/length(cls)))))
+  }
+  return(pick.fea)
+}
+
 
 #' A function to slide data according to the class hierarchies. And updates the class labels.
 #' @param Tdata
