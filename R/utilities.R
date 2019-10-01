@@ -101,6 +101,7 @@ FixLab <- function(xstring){
 CVRunner <- function(Ref, ClassLabels, TreeTable=NULL, cv_k=5, method="hrf"){
 
   # Create K-fold data split:
+  CMtab <- vector("list", length = cv_k)
   flds <- caret::createFolds(ClassLabels, k = cv_k, list = TRUE, returnTrain = FALSE)
   hPRF_cv <- do.call(rbind.data.frame,
                      lapply(1:cv_k,
@@ -109,7 +110,7 @@ CVRunner <- function(Ref, ClassLabels, TreeTable=NULL, cv_k=5, method="hrf"){
                               trainClassLabels <- ClassLabels[-flds[[1]]]
                               trainRef <- Ref[, -flds[[1]]]
 
-                              refmod <- CreateHieR(Ref = trainRef,
+                              refmod <- CreateHieR(RefData = trainRef,
                                                    ClassLabels = trainClassLabels,
                                                    TreeTable = TreeTable)
                               #Hierfit
@@ -122,17 +123,16 @@ CVRunner <- function(Ref, ClassLabels, TreeTable=NULL, cv_k=5, method="hrf"){
                               hPRF.out <- hPRF(tpT = PriorPostTable, tree = refmod@tree[[1]])
                               hPRF.out <- c(Tool="HieRFIT",
                                             CV_k=i,
-                                            hPRF.out,
-                                            Undetermined=nrow(PriorPostTable[PriorPostTable$Projection == "Undetermined",])/length(PriorPostTable[,1]))
+                                            hPRF.out)
 
-
+                              CMtab[[i]] <- PriorPostTable
                               print(hPRF.out)
                               cc <- t(hPRF.out)
                               return(cc)
                             }
                      )
   )
-  return(hPRF_cv)
+  return(list(metrics=hPRF_cv, Confusion=CMtab))
 }
 
 #' A function to evaluate performance of HieRFIT with various Certainty thresholds.

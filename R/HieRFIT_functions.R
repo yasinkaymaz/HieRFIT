@@ -37,7 +37,7 @@ HieMetrics <- setClass(Class = "HieMetrics",
 #' @export
 #' @usage expRefObj <- get(load("data/exp_refObj.Rdata"))
 #' @usage cpo <- HieRFIT(Query = as.matrix(pbmc1@data), refMod = expRefobj)
-HieRFIT <- function(Query, refMod, Prior=NULL, xSpecies=NULL, ortoDict=NULL, alpha=.9){
+HieRFIT <- function(Query, refMod, Prior=NULL, xSpecies=NULL, ortoDict=NULL, alpha=0){
 
   if (class(Query) == "seurat" | class(Query) == "Seurat" ){
     Query_d <- as.matrix(Query@data)}else{Query_d <- Query}
@@ -266,7 +266,7 @@ CandidateDetector2 <- function(PCertVector, tree, alpha=0){
     AncPath <- GetAncestPath(tree = tree, class = node.lab, labels = T)
     if( (mean(as.numeric(PCertVector[AncPath])) > alpha) &
         !(AncPath[1] %in% Path_nodes_of_candits) #&
-        #(as.numeric(PCertVector[AncPath[1]]) > alpha)
+        #as.numeric(PCertVector[AncPath[1]]) > alpha
         ){
       CandidNodes <- c(CandidNodes, AncPath[1])
       Path_nodes_of_candits <- unique(c(Path_nodes_of_candits, AncPath[2:length(AncPath)]))
