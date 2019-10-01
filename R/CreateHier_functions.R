@@ -129,11 +129,13 @@ NodeTrainer <- function(Rdata, tree, node, f_n=200, tree_n=500, ...){
   node.ClassLabels <- node.Data$ClassLabels
   node.Data <- droplevels(subset(node.Data, select=-c(ClassLabels)))
   node.Data <- node.Data[, apply(node.Data, 2, var) != 0]
-
-  # P_dict <- FeatureSelector(Data = node.Data,
-  #                           ClassLabels = node.ClassLabels,
-  #                           num = f_n,
-  #                           ...)
+  #First select the highly variable genes that correlate with the PCs
+  P_dict <- FeatureSelector(Data = node.Data,
+                             ClassLabels = node.ClassLabels,
+                             num = 2000,
+                             ...)
+  node.Data <- droplevels(subset(node.Data, select=c(P_dict)))
+  #Then, select the genes as predictors if statistically DE between the classes.
   P_dict <- FeatureSelector2(Data = node.Data,
                             ClassLabels = node.ClassLabels,
                             num = f_n,
