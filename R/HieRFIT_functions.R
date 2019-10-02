@@ -117,7 +117,7 @@ CTTraverser <- function(Query, tree, hiemods, thread=NULL){
       nodePvotes <- PvoteR(model = nodeModel, QueData = nodeQueData)
       #Calculate the probability weights of each class by random permutation:
       nodeQueWs <- graWeighteR(model = nodeModel, QueData = nodeQueData )
-      nodeQueWs2 <- graWeighteR2(model = nodeModel, QueData = nodeQueData )
+      #nodeQueWs2 <- graWeighteR2(model = nodeModel, QueData = nodeQueData )
       #Estimate Certainty of prediction probabilities per class:
       nodeQueCers <- ceR(qP = nodePvotes, qW = nodeQueWs)
       #Calculate node Scores:
@@ -131,7 +131,7 @@ CTTraverser <- function(Query, tree, hiemods, thread=NULL){
       Scores <- cbind(Scores, nodeScores)
       if(i != fi){
         Pvotes <- cbind(Pvotes, nodePvotes)
-        QueWs <- cbind(QueWs, nodeQueWs2)
+        QueWs <- cbind(QueWs, nodeQueWs)
         QueCers <- cbind(QueCers, nodeQueCers)
       }
     } #closes the for loop.

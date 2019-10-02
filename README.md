@@ -55,14 +55,14 @@ Then, create the reference model using the cell class labels. Here, we can use a
 ```{r}
 library(HieRFIT)
 
-refmod <- CreateHieR(Ref = as.matrix(pbmc@data),
+refmod <- CreateHieR(RefData = as.matrix(pbmc@data),
                           ClassLabels = pbmc@meta.data$ClusterNames_0.6,
                           TreeTable = treeTable)
 
 #Project the cell class labels on the new dataset:
 ProObj <- HieRFIT(Query = as.matrix(newPBMC@data), refMod = refmod)
 
-newPBMC@meta.data$ProjectedCellTypes <- ProObj@Projection
+newPBMC@meta.data$ProjectedCellTypes <- ProObj@Evaluation$Projection
 
 ```
 Alternatively, you can directly update the Seurat object:

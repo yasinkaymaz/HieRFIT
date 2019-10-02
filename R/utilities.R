@@ -107,32 +107,31 @@ CVRunner <- function(Ref, ClassLabels, TreeTable=NULL, cv_k=5, method="hrf"){
                      lapply(1:cv_k,
                             function(i){
                               #Create hieR
-                              trainClassLabels <- ClassLabels[-flds[[1]]]
-                              trainRef <- Ref[, -flds[[1]]]
+                              trainClassLabels <- ClassLabels[-flds[[i]]]
+                              trainRef <- Ref[, -flds[[i]]]
 
                               refmod <- CreateHieR(RefData = trainRef,
                                                    ClassLabels = trainClassLabels,
                                                    TreeTable = TreeTable)
                               #Hierfit
-                              testClassLables <- ClassLabels[flds[[1]]]
-                              testRef <- Ref[, flds[[1]]]
+                              testClassLabels <- ClassLabels[flds[[i]]]
+                              testRef <- Ref[, flds[[i]]]
 
 
-                              testObj <- HieRFIT(Query = testRef, refMod = refmod, Prior = testClassLables)
+                              testObj <- HieRFIT(Query = testRef, refMod = refmod, Prior = testClassLabels)
                               PriorPostTable <- data.frame(Prior=testObj@Prior, Projection = testObj@Evaluation$Projection)
                               hPRF.out <- hPRF(tpT = PriorPostTable, tree = refmod@tree[[1]])
                               hPRF.out <- c(Tool="HieRFIT",
                                             CV_k=i,
                                             hPRF.out)
 
-                              CMtab[[i]] <- PriorPostTable
                               print(hPRF.out)
                               cc <- t(hPRF.out)
                               return(cc)
                             }
                      )
   )
-  return(list(metrics=hPRF_cv, Confusion=CMtab))
+  return(hPRF_cv)
 }
 
 #' A function to evaluate performance of HieRFIT with various Certainty thresholds.
