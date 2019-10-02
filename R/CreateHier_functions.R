@@ -125,7 +125,7 @@ HieRandForest <- function(RefData, ClassLabels, tree, thread=3, ...){
 #' @param f_n number of features to be included in local classifier.
 NodeTrainer <- function(Rdata, tree, node, f_n=200, tree_n=500, ...){
 
-  node.Data <- SubsetTData(Tdata = Rdata, tree = tree, node = node)
+  node.Data <- SubsetTData2(Tdata = Rdata, tree = tree, node = node)
   node.ClassLabels <- node.Data$ClassLabels
   node.Data <- droplevels(subset(node.Data, select=-c(ClassLabels)))
   node.Data <- node.Data[, apply(node.Data, 2, var) != 0]
@@ -143,6 +143,30 @@ NodeTrainer <- function(Rdata, tree, node, f_n=200, tree_n=500, ...){
   node.Data <- droplevels(subset(node.Data, select=c(P_dict)))
   node.Data$ClassLabels <- node.ClassLabels
 
+  #Generate outgroup data for the node:
+  #1. check the node: is.internal? is.not.Root?
+  labs_l <- c(tree$tip.label, tree$node.label)
+
+  if(labs_l[node] != "TaxaRoot"){
+  parent.t <- tree$edge[which(x = tree$edge[, 2] == node), ][1]
+  for(n in 1:length(labs_l)){
+    if(labs_l[n] != "TaxaRoot"){
+      parent.p <- tree$edge[which(x = tree$edge[, 2] == n), ][1]
+      if(parent.t == parent.p & node != n){
+        print(paste("Training for", labs_l[node], "and its sibling is:", labs_l[n]))
+        #SubsetTData
+        node.outData <- SubsetTData2(Tdata = Rdata, tree = tree, node = n)
+        node.outData <- droplevels(subset(node.outData, select=c(P_dict)))
+        node.outData$ClassLabels <- paste(labs_l[node], "OutGroup", sep="_")
+        if(dim(node.outData)[1] > 500){
+          node.outData <- node.outData[sample(rownames(node.outData), size = 500), ]
+        }
+        node.Data <- rbind(node.Data, node.outData)
+       }
+     }
+   }
+  }
+  #--#
   train.control <- caret::trainControl(method="oob",
                                        returnData = FALSE,
                                        savePredictions = "none",
@@ -288,5 +312,41 @@ SubsetTData <- function(Tdata, tree, node){
     #Combine with all other child node data
     SubTdata <- rbind(SubTdata, Subdata)
   }
+  return(SubTdata)
+}
+
+SubsetTData2 <- function(Tdata, tree, node){
+
+  labs_l <- c(tree$tip.label, tree$node.label)
+
+  if(labs_l[node] %in% tree$tip.label){
+    childNodes <- list(labs_l[node])
+    SubTdata <- droplevels(Tdata[which(Tdata$ClassLabels %in% childNodes[[1]]), ])
+
+  }else{
+
+  # 1. Extract the data under the node. Subsample if necessary.
+  childNodes <- GetChildNodeLeafs(tree = tree, node = node)
+  SubTdata <- NULL
+  #loop through child nodes that are not null in the list.
+  for (i in which(lapply(childNodes, length) > 0)){
+    Subdata <- droplevels(Tdata[which(Tdata$ClassLabels %in% childNodes[i][[1]]), ])
+    if (i > length(tree$tip.label)){# if the node is not a leaf node, then
+      if(!is.null(tree$node.label)){# if labels for subnodes exist
+        labels <- c(tree$tip.label, tree$node.label)
+        #Replace labels with subnode labels.
+        Subdata$ClassLabels <- as.factor(labels[i])
+      } else {
+        #if subnodes don't exist, replace class tip labels with childnode label.
+        Subdata$ClassLabels <- as.factor(i)
+      }
+    } else {#if the node is a terminal leaf
+      #Replace class tip labels with Leaf labels.
+      Subdata$ClassLabels <- as.factor(childNodes[i][[1]])
+    }
+    #Combine with all other child node data
+    SubTdata <- rbind(SubTdata, Subdata)
+  }
+ }
   return(SubTdata)
 }
