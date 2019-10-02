@@ -117,6 +117,7 @@ CTTraverser <- function(Query, tree, hiemods, thread=NULL){
       nodePvotes <- PvoteR(model = nodeModel, QueData = nodeQueData)
       #Calculate the probability weights of each class by random permutation:
       nodeQueWs <- graWeighteR(model = nodeModel, QueData = nodeQueData )
+      nodeQueWs2 <- graWeighteR2(model = nodeModel, QueData = nodeQueData )
       #Estimate Certainty of prediction probabilities per class:
       nodeQueCers <- ceR(qP = nodePvotes, qW = nodeQueWs)
       #Calculate node Scores:
@@ -124,12 +125,13 @@ CTTraverser <- function(Query, tree, hiemods, thread=NULL){
       #                   format = "prob",
       #                   QueData = nodeQueData,
       #                   node = i)
-      nodeScores <- nodePvotes/nodeQueWs
+      #nodeScores <- nodePvotes/nodeQueWs
+      nodeScores <- nodePvotes
       colnames(nodeScores) <- paste(i, colnames(nodeScores), sep = "")
       Scores <- cbind(Scores, nodeScores)
       if(i != fi){
         Pvotes <- cbind(Pvotes, nodePvotes)
-        QueWs <- cbind(QueWs, nodeQueWs)
+        QueWs <- cbind(QueWs, nodeQueWs2)
         QueCers <- cbind(QueCers, nodeQueCers)
       }
     } #closes the for loop.
@@ -195,6 +197,14 @@ graWeighteR <- function(model, QueData){
   QueWeights <- t(as.data.frame(Ws))[rep(1, each=nrow(QueData)), ]
   QueWeights <- as.data.frame(QueWeights)
   return(QueWeights)
+}
+graWeighteR2 <- function(model, QueData){
+  #Randomizing only feature space
+  QueData_R <- RandomizeR(df = QueData, n = 20)
+  QueData_R <- QueData_R[sample(rownames(QueData_R), size = nrow(QueData)),]
+  pvts_R <- PvoteR(model = model, QueData = QueData_R)
+  pvts_R <- as.data.frame(pvts_R)
+  return(pvts_R)
 }
 
 #' Certainty Estimation function. Calculates certainty values for each class probability.
