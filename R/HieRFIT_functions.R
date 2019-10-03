@@ -125,8 +125,8 @@ CTTraverser <- function(Query, tree, hiemods, thread=NULL){
       #                   format = "prob",
       #                   QueData = nodeQueData,
       #                   node = i)
-      #nodeScores <- nodePvotes/nodeQueWs
-      nodeScores <- nodePvotes
+      nodeScores <- nodePvotes/nodeQueWs
+      #nodeScores <- nodePvotes
       colnames(nodeScores) <- paste(i, colnames(nodeScores), sep = "")
       Scores <- cbind(Scores, nodeScores)
       if(i != fi){

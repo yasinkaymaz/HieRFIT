@@ -88,7 +88,8 @@ HieRandForest <- function(RefData, ClassLabels, tree, thread=3, ...){
       print(paste("Training local node", tree$node.label[i-length(tree$tip.label)], sep=" "))
       setTxtProgressBar(pb, p)
 
-      hiemods[[i]] <- NodeTrainer(Rdata = Rdata, tree = tree, node = i, ...)
+      #hiemods[[i]] <- NodeTrainer(Rdata = Rdata, tree = tree, node = i, ...)
+      hiemods[[i]] <- NodeTrainer2(Rdata = Rdata, tree = tree, node = i, ...)
       p=p+1
     } #closes the for loop.
 
@@ -165,6 +166,66 @@ NodeTrainer <- function(Rdata, tree, node, f_n=200, tree_n=500, ...){
        }
      }
    }
+  }
+  #--#
+  train.control <- caret::trainControl(method="oob",
+                                       returnData = FALSE,
+                                       savePredictions = "none",
+                                       returnResamp = "none",
+                                       allowParallel = TRUE,
+                                       classProbs =  TRUE,
+                                       trim = TRUE)
+  node.mod <- caret::train(ClassLabels~.,
+                           data = node.Data,
+                           method = "rf",
+                           norm.votes = TRUE,
+                           importance = FALSE,
+                           proximity = FALSE,
+                           outscale = FALSE,
+                           preProcess = c("center", "scale"),
+                           ntree = tree_n,
+                           trControl = train.control, ...)
+
+  return(node.mod)
+}
+
+NodeTrainer2 <- function(Rdata, tree, node, f_n=200, tree_n=500, ...){
+
+  node.Data <- SubsetTData(Tdata = Rdata, tree = tree, node = node)
+  node.ClassLabels <- node.Data$ClassLabels
+  node.Data <- droplevels(subset(node.Data, select=-c(ClassLabels)))
+  node.Data <- node.Data[, apply(node.Data, 2, var) != 0]
+  #First select the highly variable genes that correlate with the PCs
+  P_dict <- FeatureSelector(Data = node.Data,
+                             ClassLabels = node.ClassLabels,
+                             num = 2000,
+                             ...)
+  node.Data <- droplevels(subset(node.Data, select=c(P_dict)))
+  #Then, select the genes as predictors if statistically DE between the classes.
+  P_dict <- FeatureSelector2(Data = node.Data,
+                            ClassLabels = node.ClassLabels,
+                            num = f_n,
+                            ...)
+  node.Data <- droplevels(subset(node.Data, select=c(P_dict)))
+  node.Data$ClassLabels <- node.ClassLabels
+
+  #Generate outgroup data for the node:
+  #1. check the node: is.not.Root?
+  labs_l <- c(tree$tip.label, tree$node.label)
+  if(labs_l[node] != "TaxaRoot"){
+    childNodes <- GetChildNodeLeafs(tree = tree, node = node)
+    childLeafs <- NULL
+    for (i in which(lapply(childNodes, length) > 0)){
+      childLeafs <- c(childLeafs, childNodes[i][[1]])
+    }
+    outGroupLeafs <- tree$tip.label[!tree$tip.label %in% childLeafs]
+    node.outData <- droplevels(Rdata[which(Rdata$ClassLabels %in% outGroupLeafs), ])
+    if(dim(node.outData)[1] > 500){
+      node.outData <- node.outData[sample(rownames(node.outData), size = 500), ]#500 can be replaced with a better #
+    }
+    node.outData <- droplevels(subset(node.outData, select=c(P_dict)))
+    node.outData$ClassLabels <- paste(labs_l[node], "OutGroup", sep="_")
+    node.Data <- rbind(node.Data, node.outData)
   }
   #--#
   train.control <- caret::trainControl(method="oob",
