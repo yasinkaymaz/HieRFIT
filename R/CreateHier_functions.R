@@ -310,7 +310,9 @@ FeatureSelector <- function(Data, ClassLabels, PC_n = 40, num = 200, ...) {
 
 FeatureSelector2 <- function(Data, ClassLabels, num = 200, ...) {
   cls <- levels(ClassLabels)
-  Data.cl <- data.frame(Data, ClassLabels = ClassLabels)
+  #Data.cl <- data.frame(Data, ClassLabels = ClassLabels)# If you do this way, it cannot find genes, gives error. Weird!
+  Data.cl <- Data
+  Data.cl$ClassLabels <- ClassLabels
   ptab <- NULL
   for(i in names(Data)){
     fea.stats <- NULL
