@@ -101,6 +101,7 @@ CTTraverser <- function(Query, tree, hiemods, thread=NULL){
     for(i in node.list){
       #nodeModel <- hiemods[[as.character(i)]][[1]]
       nodeModel <- hiemods[[as.character(i)]]
+      c_f <- length(nodeModel$levels)
       #Create QueData:
       P_dicts <- FixLab(xstring = nodeModel$finalModel$xNames)
       nodeQueData <- Query[which(rownames(Query) %in% P_dicts), ]
@@ -135,8 +136,8 @@ CTTraverser <- function(Query, tree, hiemods, thread=NULL){
         QueCers <- cbind(QueCers, nodeQueCers)
       }
     } #closes the for loop.
-    #S_path_prod <- ClassProbCalculator(tree = tree, nodes_P_all = Scores)
-    S_path_prod <- ClassProbCalculator2(tree = tree, nodes_P_all = Scores)
+    S_path_prod <- ClassProbCalculator(tree = tree, nodes_P_all = Scores)
+    #S_path_prod <- ClassProbCalculator2(tree = tree, nodes_P_all = Scores)
     HieMetrxObj <- new(Class = "HieMetrics",
                        Pvotes = Pvotes,
                        QueWs = QueWs,
