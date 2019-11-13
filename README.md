@@ -52,20 +52,23 @@ pbmc <- UpdateSeuratObject(pbmc)
 ```
 <br/>
 The reference data has the metadata for cell type assignments:
+
 ```{r}
 table(pbmc@meta.data$ClusterNames_0.6)
 ```
 
-![](data/extra/ref_celltypesTable.png){width=80%}
+![](data/extra/ref_celltypesTable.png)
 <br/>
+
 ```{r}
 # A tree file for cell type hierarchy:
 treeTable <- read.delim("pbmc3k_taxa.txt", header = F)
 ```
+
 This tree file is a custom organization of cell types in the reference dataset. A tab separated file with columns storing the subnode of each ancestor type (if exist) as below:
 
 
-![](data/extra/treeFile_raw.png){ width=35% }
+![](data/extra/treeFile_raw.png | width=100 )
 <br/>
 ```{r}
 #if you want to visualize how the topology looks like:
