@@ -14,6 +14,7 @@ library(devtools)
 
 install_github("yasinkaymaz/HieRFIT")
 
+library(HieRFIT)
 ```
 
 
@@ -35,8 +36,9 @@ library(Seurat)
 # Process the data:
 new.pbmc.data <- Read10X("pbmc_10k_v3/filtered_feature_bc_matrix/")
 
-#The function SeuratWrapper is a wrapper function for quick processing.
-newPBMC <- SeuratWrapper(ExpData = new.pbmc.data, ProjectLabel = "newPBMC", Normalize = T, scale.only.var = T, PCs = 10, dump.files = F )
+#This is the basic 10X data processing with Seurat (version 3).
+newPBMC <- CreateSeuratObject(counts = new.pbmc.data, project = "pbmc10k", min.cells = 3, min.features = 200)
+newPBMC <- NormalizeData(newPBMC)
 
 ```
 
@@ -45,36 +47,69 @@ Load the reference data
 ```{r}
 pbmc <- get(load("pbmc3k_final.Rda"))
 
+#You need to update it to the new Seurat format if necessary:
+pbmc <- UpdateSeuratObject(pbmc)
+```
+<br/>
+The reference data has the metadata for cell type assignments:
+```{r}
+table(pbmc@meta.data$ClusterNames_0.6)
+```
+<br/>
+![](data/extra/ref_celltypesTable.png){width=80%}
+<br/>
+```{r}
 # A tree file for cell type hierarchy:
 treeTable <- read.delim("pbmc3k_taxa.txt", header = F)
+```
+This tree file is a custom organization of cell types in the reference dataset. A tab separated file with columns storing the subnode of each ancestor type (if exist) as below:
 
+<br/>
+![](data/extra/treeFile_raw.png){ width=35% }
+<br/>
+```{r}
+#if you want to visualize how the topology looks like:
+source("https://raw.githubusercontent.com/yasinkaymaz/HieRFIT/master/data/extra/ploting_functions.R")
+PlotTopo(treeTable = treeTable)
 ```
 
+![](data/extra/3Kpbmc_tree.png){ width=50% }
+<br/>
 Then, create the reference model using the cell class labels. Here, we can use a topology tree for defining relationship between the cell groups ("pbmc3k_tree").
 
 ```{r}
 library(HieRFIT)
 
-refmod <- CreateHieR(RefData = as.matrix(pbmc@data),
-                          ClassLabels = pbmc@meta.data$ClusterNames_0.6,
-                          TreeTable = treeTable)
+refmod <- CreateHieR(RefData = as.matrix(pbmc[["RNA"]]@data),
+                     ClassLabels = pbmc@meta.data$ClusterNames_0.6,
+                     TreeTable = treeTable)
+
+#After creating the model, you can save it for later use:
+SaveHieRMod(refMod = refmod, fileName = "PBMC3K_HierMod")
 
 #Project the cell class labels on the new dataset:
-ProObj <- HieRFIT(Query = as.matrix(newPBMC@data), refMod = refmod)
+ProObj <- HieRFIT(Query = as.matrix(newPBMC[["RNA"]]@data), refMod = refmod)
 
 newPBMC@meta.data$ProjectedCellTypes <- ProObj@Evaluation$Projection
 
 ```
-Alternatively, you can directly update the Seurat object:
 
+meta.data slot of the object will now store all the final cell type prediction in the column "ProjectedCellTypes".
 ```{r}
-#Project the cell class labels on the new dataset:
-newPBMC <- HieRFIT(Query = newPBMC, refMod = refmod)
-
 head(newPBMC@meta.data)
-
 ```
-meta.data slot of the object will carry all class probailities as well as the final cell type prediction column, "Projection".
+<br/>
+![](data/extra/meta.data.png){width=%35}
+<br/>
+Also, you can visualize the cell type projection results in percent distributions on the classification tree defined above:
+```{r}
+PlotTopoStats(treeTable = treeTable, Projections = newPBMC@meta.data$ProjectedCellTypes)
+```
+<br/>
+![](data/extra/reportTree.png){width=%35}
+<br/>
+
+
 
 ### How it works:
 
@@ -90,12 +125,12 @@ meta.data slot of the object will carry all class probailities as well as the fi
 HieRFIT can take an argument "xSpecies" for inter-species cross projection of cell types. In this example below, we demonstrate how to use a HieR model, "refmodZr4" build on mouse brain single cell atlas to project cell type labels on to a rat single cell data. Using biomaRt package, we find the orthologous genes between two species.
 
 ```{r}
-hippo006.HierObj <- HieRFIT(Query = as.matrix(hippo006@data), refMod = refmodZr4, xSpecies = "mouse2rat")
+hippo006.HierObj <- HieRFIT(Query = as.matrix(hippo006[["RNA"]]@data), refMod = refmodZr4, xSpecies = "mouse2rat")
 ```
 This command above also creates a dataframe called "ortoDict" and saves it in the global environment. This table can be fed into other HieRFIT runs using "ortoDict" argument, if same xSpecies is the case, to save time as follows:
 
 ```{r}
-hippo006.HierObj <- HieRFIT(Query = as.matrix(hippo006@data),
+hippo006.HierObj <- HieRFIT(Query = as.matrix(hippo006[["RNA"]]@data),
                             refMod = refmodZr4,
                             xSpecies = "mouse2rat",
                             ortoDict = ortoDict)
