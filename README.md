@@ -70,13 +70,14 @@ This tree file is a custom organization of cell types in the reference dataset. 
 <img src="data/extra/treeFile_raw.png" width="40%">
 
 <br/>
+
 ```{r}
 #if you want to visualize how the topology looks like:
 source("https://raw.githubusercontent.com/yasinkaymaz/HieRFIT/master/data/extra/ploting_functions.R")
 PlotTopo(treeTable = treeTable)
 ```
 
-<img src="data/extra/3Kpbmc_tree.png" width="50%">
+<img src="data/extra/3Kpbmc_tree.png" width="75%">
 
 <br/>
 Then, create the reference model using the cell class labels. Here, we can use a topology tree for defining relationship between the cell groups ("pbmc3k_tree").
@@ -99,19 +100,21 @@ newPBMC@meta.data$ProjectedCellTypes <- ProObj@Evaluation$Projection
 ```
 
 meta.data slot of the object will now store all the final cell type prediction in the column "ProjectedCellTypes".
+
 ```{r}
 head(newPBMC@meta.data)
 ```
 
-<img src="data/extra/meta.data.png" width="35%">
+<img src="data/extra/meta.data.png" width="75%">
 
 <br/>
 Also, you can visualize the cell type projection results in percent distributions on the classification tree defined above:
+
 ```{r}
 PlotTopoStats(treeTable = treeTable, Projections = newPBMC@meta.data$ProjectedCellTypes)
 ```
 
-<img src="data/extra/reportTree.png" width="35%">
+<img src="data/extra/reportTree.png" width="75%">
 
 <br/>
 
