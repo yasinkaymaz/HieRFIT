@@ -69,6 +69,9 @@ This tree file is a custom organization of cell types in the reference dataset. 
 
 
 ![](data/extra/treeFile_raw.png | width=100 )
+
+<img src="data/extra/treeFile_raw.png" width="40%">
+
 <br/>
 ```{r}
 #if you want to visualize how the topology looks like:
