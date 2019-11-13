@@ -55,7 +55,7 @@ The reference data has the metadata for cell type assignments:
 ```{r}
 table(pbmc@meta.data$ClusterNames_0.6)
 ```
-<br/>
+
 ![](data/extra/ref_celltypesTable.png){width=80%}
 <br/>
 ```{r}
@@ -64,7 +64,7 @@ treeTable <- read.delim("pbmc3k_taxa.txt", header = F)
 ```
 This tree file is a custom organization of cell types in the reference dataset. A tab separated file with columns storing the subnode of each ancestor type (if exist) as below:
 
-<br/>
+
 ![](data/extra/treeFile_raw.png){ width=35% }
 <br/>
 ```{r}
@@ -98,14 +98,14 @@ meta.data slot of the object will now store all the final cell type prediction i
 ```{r}
 head(newPBMC@meta.data)
 ```
-<br/>
+
 ![](data/extra/meta.data.png){width=%35}
 <br/>
 Also, you can visualize the cell type projection results in percent distributions on the classification tree defined above:
 ```{r}
 PlotTopoStats(treeTable = treeTable, Projections = newPBMC@meta.data$ProjectedCellTypes)
 ```
-<br/>
+
 ![](data/extra/reportTree.png){width=%35}
 <br/>
 
