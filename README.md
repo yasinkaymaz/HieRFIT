@@ -65,7 +65,7 @@ table(pbmc@meta.data$ClusterNames_0.6)
 treeTable <- read.delim("pbmc3k_taxa.txt", header = F)
 ```
 
-This tree file is a custom organization of cell types in the reference dataset. A tab separated file with columns storing the subnode of each ancestor type (if exist) as below:
+This tree file stores the a custom organization of cell types in the reference dataset. In this tab separated file, each row leads to a cell type in the reference optionally put together under an ancestor type as below. For this example, we create two broader cell type classes, "T cells" which will be the parent of "CD4 T cells" and "CD8 T cells" and secondly "Monocytes" as the parent of "CD14+ Monocytes" and "FCGR3A+ Monocytes".
 
 <img src="data/extra/treeFile_raw.png" width="40%">
 
@@ -80,7 +80,7 @@ PlotTopo(treeTable = treeTable)
 <img src="data/extra/3Kpbmc_tree.png" width="75%">
 
 <br/>
-Then, create the reference model using the cell class labels. Here, we can use a topology tree for defining relationship between the cell groups ("pbmc3k_tree").
+Then, create the reference model using the cell class labels and the tree topology which we defined above out of reference cell types.
 
 ```{r}
 library(HieRFIT)
@@ -118,6 +118,7 @@ PlotTopoStats(treeTable = treeTable, Projections = newPBMC@meta.data$ProjectedCe
 
 <br/>
 
+This report shows the distribution of cell types in the query dataset (newPBMC) as we projected the reference model with regard to the tree topology.
 
 
 ### How it works:
