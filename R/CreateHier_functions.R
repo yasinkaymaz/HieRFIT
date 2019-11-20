@@ -100,7 +100,7 @@ HieRandForest <- function(RefData, ClassLabels, tree, thread=3, ...){
     clusterEvalQ(cl, .libPaths("/n/home13/yasinkaymaz/biotools/Rlibs/"))
     print(paste("registered cores is", getDoParWorkers(), sep = " "))
     out <- foreach(i=node.list, .packages = c('caret'), .inorder = TRUE, .export = ls(.GlobalEnv)) %dopar% {
-      NodeTrainer(Rdata = Rdata, tree = tree, node = i, ...)
+      NodeTrainer2(Rdata = Rdata, tree = tree, node = i, ...)
     }
     stopCluster(cl)
 
@@ -108,11 +108,11 @@ HieRandForest <- function(RefData, ClassLabels, tree, thread=3, ...){
       hiemods[node.list[x]] <- out[x]
     }
   }
-  FlatTreeTable <- data.frame(V1=names(table(ClassLabels)))
-  tree <- CreateTree(treeTable = FlatTreeTable)
-  fi <- DigestTree(tree = tree)
+  #FlatTreeTable <- data.frame(V1=names(table(ClassLabels)))
+  #tree <- CreateTree(treeTable = FlatTreeTable)
+  #fi <- DigestTree(tree = tree)
   #i is the last node in the node.list above:
-  hiemods[[i+1]] <- NodeTrainer(Rdata = Rdata, tree = tree, node = fi)
+  #hiemods[[i+1]] <- NodeTrainer(Rdata = Rdata, tree = tree, node = fi)
   names(hiemods) <- seq_along(hiemods)
   hiemods[sapply(hiemods, is.null)] <- NULL
 

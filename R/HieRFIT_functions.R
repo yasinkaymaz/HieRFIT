@@ -39,8 +39,8 @@ HieMetrics <- setClass(Class = "HieMetrics",
 #' @usage cpo <- HieRFIT(Query = as.matrix(pbmc1@data), refMod = expRefobj)
 HieRFIT <- function(Query, refMod, Prior=NULL, xSpecies=NULL, ortoDict=NULL, alpha=0){
 
-  if (class(Query) == "seurat" | class(Query) == "Seurat" ){
-    Query_d <- as.matrix(Query@data)}else{Query_d <- Query}
+  if ( class(Query) == "Seurat" ){
+    Query_d <- as.matrix(Query[["RNA"]]@data)}else{Query_d <- Query}
 
   rownames(Query_d) <- FixLab(xstring = rownames(Query_d))
 
@@ -65,7 +65,7 @@ HieRFIT <- function(Query, refMod, Prior=NULL, xSpecies=NULL, ortoDict=NULL, alp
   #Evaluate scores and run uncertainty function, then, project the class labels.
   ScoreEvals <- ScoreEval(ScoreObs = HieMetObj@Scores, tree=refMod@tree[[1]], ProbCert = HieMetObj@QueCers, alpha=alpha)
 
-  if (class(Query) == "seurat" | class(Query) == "Seurat" ){
+  if ( class(Query) == "Seurat" ){
     Query@meta.data <- cbind(Query@meta.data[, which(!colnames(Query@meta.data) %in% colnames(ScoreEvals))],
                              ScoreEvals)
     object <- Query
@@ -96,7 +96,7 @@ CTTraverser <- function(Query, tree, hiemods, thread=NULL){
   QueWs <- data.frame(row.names = colnames(Query))
   QueCers <- data.frame(row.names = colnames(Query))
   fi=node.list[length(node.list)]+1
-  node.list <- c(node.list, fi)
+  #node.list <- c(node.list, fi)
   if(is.null(thread)){
     for(i in node.list){
       #nodeModel <- hiemods[[as.character(i)]][[1]]
