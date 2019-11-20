@@ -68,7 +68,7 @@ CreateTree <- function(treeTable){
 #' @keywords
 #' @export
 #' @usage
-HieRandForest <- function(RefData, ClassLabels, tree, thread=3, ...){
+HieRandForest <- function(RefData, ClassLabels, tree, thread=3, RPATH=NULL, ...){
 
   node.list <- DigestTree(tree = tree)
   hiemods <- vector("list", length = max(node.list))
@@ -97,7 +97,7 @@ HieRandForest <- function(RefData, ClassLabels, tree, thread=3, ...){
     library(doParallel)
     cl <- makePSOCKcluster(thread)
     registerDoParallel(cl)
-    clusterEvalQ(cl, .libPaths("/n/home13/yasinkaymaz/biotools/Rlibs/"))
+    clusterEvalQ(cl, .libPaths(RPATH))
     print(paste("registered cores is", getDoParWorkers(), sep = " "))
     out <- foreach(i=node.list, .packages = c('caret'), .inorder = TRUE, .export = ls(.GlobalEnv)) %dopar% {
       NodeTrainer2(Rdata = Rdata, tree = tree, node = i, ...)
