@@ -97,12 +97,19 @@ HieRandForest <- function(RefData, ClassLabels, tree, thread=3, RPATH=NULL, ...)
     library(doParallel)
     cl <- makePSOCKcluster(thread)
     registerDoParallel(cl)
-    clusterEvalQ(cl, .libPaths(RPATH))
+    #clusterEvalQ(cl, .libPaths("/n/home13/yasinkaymaz/miniconda3/envs/R3.6/lib/R/library"))
     print(paste("registered cores is", getDoParWorkers(), sep = " "))
     out <- foreach(i=node.list, .packages = c('caret'), .inorder = TRUE, .export = ls(.GlobalEnv)) %dopar% {
       NodeTrainer2(Rdata = Rdata, tree = tree, node = i, ...)
     }
     stopCluster(cl)
+    # default <- registered()
+    # register(BatchtoolsParam(workers = thread), default = TRUE)
+    #
+    # out <- bplapply(node.list, function(i) {NodeTrainer2(Rdata = Rdata, tree = tree, node = i, ...)} )
+    #
+    # for (param in rev(default))
+    #   register(param)
 
     for(x in 1:length(out)){
       hiemods[node.list[x]] <- out[x]

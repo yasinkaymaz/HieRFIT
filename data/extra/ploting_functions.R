@@ -104,6 +104,55 @@ PlotTopoStats <- function(treeTable, Projections, aggregate=TRUE,...){### Update
 }
 
 
+PlotTopoNodeAcc <- function(treeTable, HieRMod, ...){
+
+  library(data.tree)
+  library(DiagrammeR)
+  treeTable <- data.frame(lapply(treeTable, function(x) {gsub("\\+|-|/", ".", x)}))
+  treeTable$pathString <- apply(cbind("TaxaRoot", treeTable), 1, paste0, collapse="/")
+  taxa <- as.Node(treeTable)
+  SetGraphStyle(taxa, rankdir = "LR")
+  SetEdgeStyle(taxa, arrowhead = "vee", color = "grey35", penwidth = "2px")
+
+  #Extract the node accuracy metrics:
+  nodeStats <- NULL
+  for(i in names(HieRMod@model)){
+    mtry <- HieRMod@model[[as.character(i)]]$finalModel$mtry
+    nodeStats <- rbind(nodeStats,
+                       cbind(node=i,
+                             HieRMod@model[[as.character(i)]]$results[which(HieRMod@model[[as.character(i)]]$results$mtry == mtry),],
+                             NodeLabel=HieRMod@tree[[1]]$node.label[ as.numeric(i) - length(HieRMod@tree[[1]]$tip.label)],
+                             classSize=length(HieRMod@model[[as.character(i)]]$levels)))
+  }
+  nodeStats
+  nodeStats <- nodeStats[which(nodeStats$NodeLabel %in% HieRMod@tree[[1]]$node.label),]
+  rownames(nodeStats) <- nodeStats$NodeLabel
+  nodeAcc <- round(nodeStats$Accuracy*100,digits = 1)
+  names(nodeAcc) <- nodeStats$NodeLabel
+
+  Rand <- function(x){
+    aa <- FixLab(xstring = x$name)
+    nodeAcc[aa]
+  }
+  countPct <- as.character(taxa$Get(Rand))
+  countPct[is.na(countPct)] <- '0'
+  countPct <- as.numeric(countPct)
+  taxa$Set(Perct=countPct)
+
+  cols <- colorRampPalette(c("white", "green"))(101)
+  SetNodeStyle(taxa,
+               style = "filled,rounded",
+               shape = "box",
+               label = function(node) paste(node$name,"\n", node$Perct,"%",sep=""),
+               fillcolor = function(node) cols[as.numeric(node$Perct)+1],
+               fontname = "helvetica",
+               fontcolor = "black",
+               tooltip = function(node) paste(node$Perct,"%"),
+               width=3)
+  pp <- plot(taxa, direction = "descend")
+
+  return(pp)
+}
 
 PlotProjectionStats <- function(SeuratObject, outputFilename="plotpredictions") {
   pdf(paste(outputFilename,".pdf",sep=""),width= 12, height = 8)
