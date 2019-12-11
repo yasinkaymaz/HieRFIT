@@ -17,11 +17,27 @@ RefMod <- setClass(Class = "RefMod",
 #' @usage  pbmc.refmod <- CreateRef(RefData = as.matrix(pbmc@data), ClassLabels = pbmc@meta.data$ClusterNames_0.6, TreeFile = pbmc3k_tree)
 CreateHieR <- function(RefData, ClassLabels, TreeTable=NULL, method="hrf", thread=NULL, ...){
 
-  if(method == "hrf"){
-    tree <- CreateTree(treeTable = TreeTable)
-  }else{ tree <- NULL}
-
   ClassLabels <- FixLab(xstring = ClassLabels)
+
+  if(is.null(TreeTable)){
+
+    refData_mean <- NULL
+    for(ct in unique(ClassLabels)){
+      dt <- RefData[, ClassLabels == ct]
+      ctmean <- rowMeans(as.matrix(dt))
+      refData_mean <- cbind(refData_mean, ctmean)
+    }
+    colnames(refData_mean) <- unique(ClassLabels)
+
+    cl_dists <- dist(t(refData_mean))
+    clusts <- hclust(cl_dists)
+    tree <- ape::as.phylo(clusts)
+    tree$node.label <- c("TaxaRoot", paste("Int.Node", seq(tree$Nnode-1), sep = "."))
+
+  }else{
+    tree <- CreateTree(treeTable = TreeTable)
+  }
+
 
   try(if(missing(tree)|| missing(ClassLabels) || missing(RefData))
     stop("Please, provide the required inputs!"))
