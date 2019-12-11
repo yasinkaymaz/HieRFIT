@@ -20,24 +20,10 @@ CreateHieR <- function(RefData, ClassLabels, TreeTable=NULL, method="hrf", threa
   ClassLabels <- FixLab(xstring = ClassLabels)
 
   if(is.null(TreeTable)){
-
-    refData_mean <- NULL
-    for(ct in unique(ClassLabels)){
-      dt <- RefData[, ClassLabels == ct]
-      ctmean <- rowMeans(as.matrix(dt))
-      refData_mean <- cbind(refData_mean, ctmean)
-    }
-    colnames(refData_mean) <- unique(ClassLabels)
-
-    cl_dists <- dist(t(refData_mean))
-    clusts <- hclust(cl_dists)
-    tree <- ape::as.phylo(clusts)
-    tree$node.label <- c("TaxaRoot", paste("Int.Node", seq(tree$Nnode-1), sep = "."))
-
+    tree <- CreateDeNovoTree(RefData, ClassLabels)
   }else{
     tree <- CreateTree(treeTable = TreeTable)
   }
-
 
   try(if(missing(tree)|| missing(ClassLabels) || missing(RefData))
     stop("Please, provide the required inputs!"))
@@ -73,6 +59,24 @@ CreateTree <- function(treeTable){
 
   treeTable$pathString <- apply(cbind("TaxaRoot", treeTable), 1, paste0, collapse="/")
   tree <- as.phylo(as.Node(treeTable))
+  return(tree)
+}
+#' A function to create a tree from the reference data based on euclidean distances between class types.
+#' @param RefData
+#' @param ClassLabels
+CreateDeNovoTree <- function(RefData, ClassLabels){
+  refData_mean <- NULL
+  for(ct in unique(ClassLabels)){
+    dt <- RefData[, ClassLabels == ct]
+    ctmean <- rowMeans(as.matrix(dt))
+    refData_mean <- cbind(refData_mean, ctmean)
+  }
+  colnames(refData_mean) <- unique(ClassLabels)
+
+  cl_dists <- dist(t(refData_mean))
+  clusts <- hclust(cl_dists)
+  tree <- ape::as.phylo(clusts)
+  tree$node.label <- c("TaxaRoot", paste("Int.Node", seq(tree$Nnode-1), sep = "."))
   return(tree)
 }
 
