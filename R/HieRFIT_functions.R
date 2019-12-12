@@ -95,7 +95,7 @@ CTTraverser <- function(Query, tree, hiemods, thread=NULL){
   Pvotes <- data.frame(row.names = colnames(Query))
   QueWs <- data.frame(row.names = colnames(Query))
   QueCers <- data.frame(row.names = colnames(Query))
-  fi=node.list[length(node.list)]+1
+  #fi=node.list[length(node.list)]+1
   #node.list <- c(node.list, fi)
   if(is.null(thread)){
     for(i in node.list){
@@ -130,11 +130,11 @@ CTTraverser <- function(Query, tree, hiemods, thread=NULL){
       #nodeScores <- nodePvotes
       colnames(nodeScores) <- paste(i, colnames(nodeScores), sep = "")
       Scores <- cbind(Scores, nodeScores)
-      if(i != fi){
+      #if(i != fi){
         Pvotes <- cbind(Pvotes, nodePvotes)
         QueWs <- cbind(QueWs, nodeQueWs)
         QueCers <- cbind(QueCers, nodeQueCers)
-      }
+      #}
     } #closes the for loop.
     S_path_prod <- ClassProbCalculator(tree = tree, nodes_P_all = Scores)
     #S_path_prod <- ClassProbCalculator2(tree = tree, nodes_P_all = Scores)
@@ -274,6 +274,7 @@ CandidateDetector2 <- function(PCertVector, tree, alpha=0){
   Path_nodes_of_candits <- NULL
   CandidNodes <- NULL
   for(node.lab in labs_l){
+    print(node.lab)
     AncPath <- GetAncestPath(tree = tree, class = node.lab, labels = T)
     if( (mean(as.numeric(PCertVector[AncPath])) > alpha) &
         !(AncPath[1] %in% Path_nodes_of_candits) #&
