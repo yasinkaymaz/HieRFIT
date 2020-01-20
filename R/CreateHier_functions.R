@@ -265,7 +265,7 @@ NodeTrainer3 <- function(Rdata, tree, node, f_n=200, tree_n=500, switchBox='off'
 
   #--#
   train.control <- caret::trainControl(method="oob",
-                                       returnData = TRUE,
+                                       returnData = FALSE,
                                        savePredictions = "none",
                                        returnResamp = "none",
                                        allowParallel = TRUE,
