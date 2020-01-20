@@ -109,7 +109,7 @@ HieRandForest <- function(RefData, ClassLabels, tree, thread=3, RPATH=NULL, ...)
       setTxtProgressBar(pb, p)
 
       #hiemods[[i]] <- NodeTrainer(Rdata = Rdata, tree = tree, node = i, ...)
-      hiemods[[i]] <- NodeTrainer2(Rdata = Rdata, tree = tree, node = i, ...)
+      hiemods[[i]] <- NodeTrainer3(Rdata = Rdata, tree = tree, node = i, ...)
       p=p+1
     } #closes the for loop.
 
@@ -120,7 +120,7 @@ HieRandForest <- function(RefData, ClassLabels, tree, thread=3, RPATH=NULL, ...)
     #clusterEvalQ(cl, .libPaths("/n/home13/yasinkaymaz/miniconda3/envs/R3.6/lib/R/library"))
     print(paste("registered cores is", getDoParWorkers(), sep = " "))
     out <- foreach(i=node.list, .packages = c('caret'), .inorder = TRUE, .export = ls(.GlobalEnv)) %dopar% {
-      NodeTrainer2(Rdata = Rdata, tree = tree, node = i, ...)
+      NodeTrainer3(Rdata = Rdata, tree = tree, node = i, ...)
     }
     stopCluster(cl)
     # default <- registered()
@@ -216,24 +216,14 @@ NodeTrainer <- function(Rdata, tree, node, f_n=200, tree_n=500, ...){
   return(node.mod)
 }
 
-NodeTrainer2 <- function(Rdata, tree, node, f_n=200, tree_n=500, ...){
+
+NodeTrainer3 <- function(Rdata, tree, node, f_n=200, tree_n=500, switchBox='off', ...){
 
   node.Data <- SubsetTData(Tdata = Rdata, tree = tree, node = node)
   node.ClassLabels <- node.Data$ClassLabels
   node.Data <- droplevels(subset(node.Data, select=-c(ClassLabels)))
   node.Data <- node.Data[, apply(node.Data, 2, var) != 0]
-  #First select the highly variable genes that correlate with the PCs
-  P_dict <- FeatureSelector(Data = node.Data,
-                             ClassLabels = node.ClassLabels,
-                             num = 2000,
-                             ...)
-  node.Data <- droplevels(subset(node.Data, select=c(P_dict)))
-  #Then, select the genes as predictors if statistically DE between the classes.
-  P_dict <- FeatureSelector2(Data = node.Data,
-                            ClassLabels = node.ClassLabels,
-                            num = f_n,
-                            ...)
-  node.Data <- droplevels(subset(node.Data, select=c(P_dict)))
+
   node.Data$ClassLabels <- node.ClassLabels
 
   #Generate outgroup data for the node:
@@ -250,13 +240,32 @@ NodeTrainer2 <- function(Rdata, tree, node, f_n=200, tree_n=500, ...){
     if(dim(node.outData)[1] > 500){
       node.outData <- node.outData[sample(rownames(node.outData), size = 500), ]#500 can be replaced with a better #
     }
-    node.outData <- droplevels(subset(node.outData, select=c(P_dict)))
+    node.outData <- droplevels(subset(node.outData, select=c(colnames(node.Data))))
     node.outData$ClassLabels <- paste(labs_l[node], "OutGroup", sep="_")
     node.Data <- rbind(node.Data, node.outData)
   }
+
+  node.ClassLabels <- node.Data$ClassLabels
+  node.Data <- droplevels(subset(node.Data, select=-c(ClassLabels)))
+
+    #First select the highly variable genes that correlate with the PCs
+    P_dict <- FeatureSelector(Data = node.Data,
+                              ClassLabels = node.ClassLabels,
+                              num = 2000,
+                              ...)
+    node.Data <- droplevels(subset(node.Data, select=c(P_dict)))
+    #Then, select the genes as predictors if statistically DE between the classes.
+    P_dict <- FeatureSelector2(Data = node.Data,
+                               ClassLabels = node.ClassLabels,
+                               num = f_n,
+                               ...)
+
+  node.Data <- droplevels(subset(node.Data, select=c(P_dict)))
+  node.Data$ClassLabels <- node.ClassLabels
+
   #--#
   train.control <- caret::trainControl(method="oob",
-                                       returnData = FALSE,
+                                       returnData = TRUE,
                                        savePredictions = "none",
                                        returnResamp = "none",
                                        allowParallel = TRUE,
@@ -275,6 +284,7 @@ NodeTrainer2 <- function(Rdata, tree, node, f_n=200, tree_n=500, ...){
 
   return(node.mod)
 }
+
 
 #' A function used internally for selecting genes based on their weight in the top principle components.
 #' @description p: pca object, pcs: number of PCs to include, num: number of genes from top and bottom.
