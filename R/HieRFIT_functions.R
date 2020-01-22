@@ -40,7 +40,7 @@ HieMetrics <- setClass(Class = "HieMetrics",
 HieRFIT <- function(Query, refMod, Prior=NULL, xSpecies=NULL, ortoDict=NULL){
 
   if ( class(Query) == "Seurat" ){
-    Query_d <- as.matrix(Query[["RNA"]]@data)}else{Query_d <- Query}
+    Query_d <- as.matrix(Query[["RNA"]]@data)}else{Query_d <- Query}#Change this to @counts and log1p after normalization
 
   rownames(Query_d) <- FixLab(xstring = rownames(Query_d))
 

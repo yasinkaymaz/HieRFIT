@@ -53,6 +53,7 @@ DetermineAlpha <- function(refmod, RefData, Prior){
   Hierobj <- HieRFIT(Query = RefData, refMod = refmod, Prior = Prior)
   fails <- Hierobj@Evaluation$Projection != Hierobj@Prior
   alpha <- mean(Hierobj@Evaluation[fails,]$Certainty)
+  if(is.na(alpha)){alpha<-0}
   return(alpha)
 }
 
