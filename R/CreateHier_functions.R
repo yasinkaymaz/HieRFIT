@@ -49,6 +49,7 @@ CreateHieR <- function(RefData, ClassLabels, TreeTable=NULL, method="hrf", threa
 }
 
 DetermineAlpha <- function(refmod, RefData, Prior){
+  refmod@alpha[[1]] <- 0
   Hierobj <- HieRFIT(Query = RefData, refMod = refmod, Prior = Prior)
   fails <- Hierobj@Evaluation$Projection != Hierobj@Prior
   alpha <- mean(Hierobj@Evaluation[fails,]$Certainty)
