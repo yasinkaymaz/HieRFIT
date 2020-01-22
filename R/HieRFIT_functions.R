@@ -37,7 +37,7 @@ HieMetrics <- setClass(Class = "HieMetrics",
 #' @export
 #' @usage expRefObj <- get(load("data/exp_refObj.Rdata"))
 #' @usage cpo <- HieRFIT(Query = as.matrix(pbmc1@data), refMod = expRefobj)
-HieRFIT <- function(Query, refMod, Prior=NULL, xSpecies=NULL, ortoDict=NULL, alpha=0){
+HieRFIT <- function(Query, refMod, Prior=NULL, xSpecies=NULL, ortoDict=NULL, alpha=NULL){
 
   if ( class(Query) == "Seurat" ){
     Query_d <- as.matrix(Query[["RNA"]]@data)}else{Query_d <- Query}
@@ -63,6 +63,11 @@ HieRFIT <- function(Query, refMod, Prior=NULL, xSpecies=NULL, ortoDict=NULL, alp
     P_path_prod <- Predictor(model = refMod@model[[1]], Query = Query_d)
   }
   #Evaluate scores and run uncertainty function, then, project the class labels.
+  if(is.null(refMod@alpha[[1]])){
+    alpha=0
+  }else{
+    alpha <- refMod@alpha[[1]]
+  }
   ScoreEvals <- ScoreEval(ScoreObs = HieMetObj@Scores, tree=refMod@tree[[1]], ProbCert = HieMetObj@QueCers, alpha=alpha)
 
   if ( class(Query) == "Seurat" ){

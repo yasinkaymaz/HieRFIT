@@ -7,6 +7,7 @@
 RefMod <- setClass(Class = "RefMod",
                    slots = c(model = "list",
                              tree = "list",
+                             alpha = "list",
                              modtype = "character"))#Add treeTable
 
 #' The main function for creating a reference model.
@@ -41,9 +42,17 @@ CreateHieR <- function(RefData, ClassLabels, TreeTable=NULL, method="hrf", threa
                 model = model,
                 modtype = method)
   refObj@tree[[1]] <- tree
-
+  alpha <- DetermineAlpha(refmod = refObj, RefData = RefData, Prior = ClassLabels)
+  refObj@alpha[[1]] <- alpha
   #foreach::registerDoSEQ()
   return(refObj)
+}
+
+DetermineAlpha <- function(refmod, RefData, Prior){
+  Hierobj <- HieRFIT(Query = RefData, refMod = refmod, Prior = Prior)
+  fails <- Hierobj@Evaluation$Projection != Hierobj@Prior
+  alpha <- mean(Hierobj@Evaluation[fails,]$Certainty)
+  return(alpha)
 }
 
 #' A function to create a tree in phylo format.
