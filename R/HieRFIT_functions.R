@@ -298,7 +298,7 @@ CandidateDetector3 <- function(PCertVector, tree, alphas){
   for(node.lab in labs_l){
     AncPath <- GetAncestPath(tree = tree, class = node.lab, labels = T)
     #if( all(PCertVector[AncPath] > alphas[[node.lab]]) &
-    if( (mean(PCertVector[AncPath]) > mean(alphas[[node.lab]])) &
+    if( (mean(as.numeric(PCertVector[AncPath])) > mean(as.numeric(alphas[[node.lab]]))) &
         !(AncPath[1] %in% Path_nodes_of_candits)
     ){
       CandidNodes <- c(CandidNodes, AncPath[1])
