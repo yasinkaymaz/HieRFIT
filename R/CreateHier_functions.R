@@ -43,9 +43,15 @@ CreateHieR <- function(RefData, ClassLabels, TreeTable=NULL, method="hrf", threa
                 modtype = method)
   refObj@tree[[1]] <- tree
   #' !!! alternatively, split the ref 10%-90% and use 10% for learning alphas
+<<<<<<< HEAD
   alpha <- DetermineAlpha(refmod = refObj, RefData = RefData, Prior = ClassLabels)
   #alpha <- DetermineAlpha3(refmod = refObj, RefData = RefData, Prior = ClassLabels)
   refObj@alpha[[1]] <- alpha
+=======
+  #alpha <- DetermineAlpha(refmod = refObj, RefData = RefData, Prior = ClassLabels)
+  alphas <- DetermineAlpha3(refmod = refObj, RefData = RefData, Prior = ClassLabels)
+  refObj@alpha[[1]] <- alphas
+>>>>>>> b1bd9da596bfc1335b672606c782bc4864111174
   #foreach::registerDoSEQ()
   return(refObj)
 }
