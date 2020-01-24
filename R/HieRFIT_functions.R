@@ -286,6 +286,27 @@ CandidateDetector2 <- function(PCertVector, tree, alpha=0){
   return(CandidNodes)
 }
 
+#' A function to find the full path of all true ancestors:
+#' @param PCertVector Probability certainty table.
+#' @param tree a tree topology with which hrf model was trained on. 'phylo' format.
+#' @param alphas a list of numeric values of node specific alpha thresholds. Learned from reference data.
+CandidateDetector3 <- function(PCertVector, tree, alphas){
+  labs_l <- c(tree$tip.label, tree$node.label)#The order is important! tips first. Don't change!#New
+  labs_l <- labs_l[!labs_l %in% "TaxaRoot"] #Double-check#New
+  Path_nodes_of_candits <- NULL
+  CandidNodes <- NULL
+  for(node.lab in labs_l){
+    AncPath <- GetAncestPath(tree = tree, class = node.lab, labels = T)
+    if( all(PCertVector[AncPath] > alphas[[node.lab]]) &
+        !(AncPath[1] %in% Path_nodes_of_candits)
+    ){
+      CandidNodes <- c(CandidNodes, AncPath[1])
+      Path_nodes_of_candits <- unique(c(Path_nodes_of_candits, AncPath[2:length(AncPath)]))
+    }
+  }
+  return(CandidNodes)
+}
+
 #' A function for evalating the uncertainty.
 #' @param ScoreObs P_path_prod for observed scores
 #' @param ProbCert Certainty scores.
@@ -298,7 +319,8 @@ ScoreEval <- function(ScoreObs, ProbCert, tree, alpha=0){
   for(i in 1:length(ProbCert[,1])){
     #candits <- colnames(ProbCert)[ProbCert[i,] > alpha]
     #candits <- CandidateDetector(PCertVector = ProbCert.logic[i,], tree=tree)
-    candits <- CandidateDetector2(PCertVector = ProbCert[i,], tree=tree, alpha=alpha)
+    #candits <- CandidateDetector2(PCertVector = ProbCert[i,], tree=tree, alpha=alpha)
+    candits <- CandidateDetector3(PCertVector = ProbCert[i,], tree=tree, alphas=alpha)
     if(length(candits) == 0){
       classL <- "Undetermined"
       classU <- max(ProbCert[i,])

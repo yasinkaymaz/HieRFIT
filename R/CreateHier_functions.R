@@ -42,8 +42,10 @@ CreateHieR <- function(RefData, ClassLabels, TreeTable=NULL, method="hrf", threa
                 model = model,
                 modtype = method)
   refObj@tree[[1]] <- tree
-  alpha <- DetermineAlpha(refmod = refObj, RefData = RefData, Prior = ClassLabels)
-  refObj@alpha[[1]] <- alpha
+  #' !!! alternatively, split the ref 10%-90% and use 10% for learning alphas
+  #alpha <- DetermineAlpha(refmod = refObj, RefData = RefData, Prior = ClassLabels)
+  alphas <- DetermineAlpha3(refmod = refObj, RefData = RefData, Prior = ClassLabels)
+  refObj@alpha[[1]] <- alphas
   #foreach::registerDoSEQ()
   return(refObj)
 }
@@ -56,6 +58,59 @@ DetermineAlpha <- function(refmod, RefData, Prior){
   if(is.na(alpha)){alpha<-0}
   return(alpha)
 }
+
+DetermineAlpha3 <- function(refmod, RefData, Prior){
+  tree <- refmod@tree[[1]]
+  labs_l <- c(tree$tip.label, tree$node.label)
+  labs_l <- labs_l[!labs_l %in% "TaxaRoot"]
+
+  alpha.list.def <- list()
+  for(node.lab in labs_l){
+    AncPath <- GetAncestPath(tree = tree, class = node.lab, labels = T)
+    alp <- rep(0, length(AncPath))
+    names(alp) <- AncPath
+    alpha.list.def[[node.lab]] <- alp
+  }
+
+  refmod@alpha[[1]] <- alpha.list.def
+
+  Hierobj <- HieRFIT(Query = RefData, refMod = refmod, Prior = Prior)
+
+  succs <- Hierobj@Evaluation$Projection == Hierobj@Prior
+  succsLabs <- as.character(Hierobj@Evaluation[succs,]$Projection)
+  succsCerst <- Hierobj@CertaintyValues[succs,]
+
+  alpha.list <- list()
+  for(node.lab in labs_l[labs_l %in% succsLabs]){
+    AncPath <- GetAncestPath(tree = tree, class = node.lab, labels = T)
+    al.list <- NULL
+    for(i in 1:length(AncPath)){
+      mincer <- min(succsCerst[succsLabs == node.lab, AncPath[i]])
+      al.list <- append(al.list, mincer)
+    }
+    names(al.list) <- AncPath
+    alpha.list[[node.lab]] <- al.list
+  }
+  alpha.list
+  for(node.lab in labs_l[!labs_l %in% succsLabs]){
+    AncPath <- GetAncestPath(tree = tree, class = node.lab, labels = T)
+    al.list <- NULL
+    for(n in 1:length(AncPath)){
+      list.n <- NULL
+      for(i in 1:length(alpha.list)){
+        n.cer <- alpha.list[[i]][AncPath[n]]
+        list.n <- append(list.n, n.cer)
+      }
+      list.n <- min(list.n, na.rm = T)
+      al.list <- append(al.list, list.n)
+    }
+    names(al.list) <- AncPath
+    alpha.list[[node.lab]] <- al.list
+  }
+
+  return(alpha.list)
+}
+
 
 #' A function to create a tree in phylo format.
 #' @param treeTable a data table/data.frame storing class relationships with intermediate class labels. Can be read from a tab separated file.
