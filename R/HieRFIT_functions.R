@@ -297,7 +297,8 @@ CandidateDetector3 <- function(PCertVector, tree, alphas){
   CandidNodes <- NULL
   for(node.lab in labs_l){
     AncPath <- GetAncestPath(tree = tree, class = node.lab, labels = T)
-    if( all(PCertVector[AncPath] > alphas[[node.lab]]) &
+    #if( all(PCertVector[AncPath] > alphas[[node.lab]]) &
+    if( (mean(PCertVector[AncPath]) > mean(alphas[[node.lab]])) &
         !(AncPath[1] %in% Path_nodes_of_candits)
     ){
       CandidNodes <- c(CandidNodes, AncPath[1])
@@ -319,8 +320,8 @@ ScoreEval <- function(ScoreObs, ProbCert, tree, alpha=0){
   for(i in 1:length(ProbCert[,1])){
     #candits <- colnames(ProbCert)[ProbCert[i,] > alpha]
     #candits <- CandidateDetector(PCertVector = ProbCert.logic[i,], tree=tree)
-    candits <- CandidateDetector2(PCertVector = ProbCert[i,], tree=tree, alpha=alpha)
-    #candits <- CandidateDetector3(PCertVector = ProbCert[i,], tree=tree, alphas=alpha)
+    #candits <- CandidateDetector2(PCertVector = ProbCert[i,], tree=tree, alpha=alpha)
+    candits <- CandidateDetector3(PCertVector = ProbCert[i,], tree=tree, alphas=alpha)
     if(length(candits) == 0){
       classL <- "Undetermined"
       classU <- max(ProbCert[i,])
