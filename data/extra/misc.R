@@ -10,6 +10,24 @@ ParApp <- function() {
 }
 
 
+NodesAcc <- function(HieRMod, ...){
+  #Extract the node accuracy metrics:
+  nodeStats <- NULL
+  for(i in names(HieRMod@model)){
+    mtry <- HieRMod@model[[as.character(i)]]$finalModel$mtry
+    nodeStats <- rbind(nodeStats,
+                       cbind(node=i,
+                             HieRMod@model[[as.character(i)]]$results[which(HieRMod@model[[as.character(i)]]$results$mtry == mtry),],
+                             NodeLabel=HieRMod@tree[[1]]$node.label[ as.numeric(i) - length(HieRMod@tree[[1]]$tip.label)],
+                             classSize=length(HieRMod@model[[as.character(i)]]$levels)))
+  }
+  nodeStats <- nodeStats[which(nodeStats$NodeLabel %in% HieRMod@tree[[1]]$node.label), ]
+  rownames(nodeStats) <- nodeStats$NodeLabel
+  nodeAcc <- round(nodeStats$Accuracy*100, digits = 1)
+  names(nodeAcc) <- nodeStats$NodeLabel
+
+  return(nodeAcc)
+}
 
 #' This function calculates a scaled Kullback-Leibler divergence
 #' @param probs a list of observed probability scores.
