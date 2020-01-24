@@ -319,13 +319,8 @@ ScoreEval <- function(ScoreObs, ProbCert, tree, alpha=0){
   for(i in 1:length(ProbCert[,1])){
     #candits <- colnames(ProbCert)[ProbCert[i,] > alpha]
     #candits <- CandidateDetector(PCertVector = ProbCert.logic[i,], tree=tree)
-<<<<<<< HEAD
     candits <- CandidateDetector2(PCertVector = ProbCert[i,], tree=tree, alpha=alpha)
     #candits <- CandidateDetector3(PCertVector = ProbCert[i,], tree=tree, alphas=alpha)
-=======
-    #candits <- CandidateDetector2(PCertVector = ProbCert[i,], tree=tree, alpha=alpha)
-    candits <- CandidateDetector3(PCertVector = ProbCert[i,], tree=tree, alphas=alpha)
->>>>>>> b1bd9da596bfc1335b672606c782bc4864111174
     if(length(candits) == 0){
       classL <- "Undetermined"
       classU <- max(ProbCert[i,])
