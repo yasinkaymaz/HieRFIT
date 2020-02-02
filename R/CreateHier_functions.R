@@ -342,10 +342,10 @@ NodeTrainer3 <- function(Rdata, tree, node, f_n=200, tree_n=500, switchBox='off'
                                num = f_n,
                                ...)
 
-    pool <- PairsPool(P_dict = P_dict, node.Data = node.Data, node.ClassLabels = node.ClassLabels)
+    #pool <- PairsPool(P_dict = P_dict, node.Data = node.Data, node.ClassLabels = node.ClassLabels)
 
-  #node.Data <- droplevels(subset(node.Data, select=c(P_dict)))
-    node.Data <- droplevels(subset(node.Data, select=c(pool)))
+    node.Data <- droplevels(subset(node.Data, select=c(P_dict)))
+    #node.Data <- droplevels(subset(node.Data, select=c(pool)))
   node.Data$ClassLabels <- node.ClassLabels
 
   #--#
