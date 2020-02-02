@@ -63,8 +63,8 @@ HieRFIT <- function(Query, refMod, Prior=NULL, xSpecies=NULL, ortoDict=NULL){
     P_path_prod <- Predictor(model = refMod@model[[1]], Query = Query_d)
   }
   #Evaluate scores and run uncertainty function, then, project the class labels.
-  ScoreEvals <- ScoreEval(ScoreObs = HieMetObj@Scores, tree=refMod@tree[[1]], ProbCert = HieMetObj@QueCers, alpha=refMod@alpha[[1]])
-
+  #ScoreEvals <- ScoreEval(ScoreObs = HieMetObj@Scores, tree=refMod@tree[[1]], ProbCert = HieMetObj@QueCers, alpha=refMod@alpha[[1]])
+  ScoreEvals <- ScoreEvaluate(ClassWeights = HieMetObj@QueCers, ProbCert = HieMetObj@QueCers, tree=refMod@tree[[1]], alpha=refMod@alpha[[1]])
   if ( class(Query) == "Seurat" ){
     Query@meta.data <- cbind(Query@meta.data[, which(!colnames(Query@meta.data) %in% colnames(ScoreEvals))],
                              ScoreEvals)
@@ -312,29 +312,90 @@ CandidateDetector3 <- function(PCertVector, tree, alphas){
 #' @param ScoreObs P_path_prod for observed scores
 #' @param ProbCert Certainty scores.
 #' @param tree a tree topology with which hrf model was trained on. 'phylo' format.
-ScoreEval <- function(ScoreObs, ProbCert, tree, alpha=0){
+ScoreEvaluate <- function(ClassWeights, ProbCert, tree, alpha=0){
 
-  #ProbCert.logic <- ProbCert > alpha#New
+  colMax <- function(data) sapply(data, max, na.rm = TRUE)
+  colMin <- function(data) sapply(data, min, na.rm = TRUE)
+
+  labs_l <- c(tree$tip.label, tree$node.label)#The order is important! tips first. Don't change!#New
+  labs_l <- labs_l[!labs_l %in% "TaxaRoot"]
+
+  df <- data.frame(row.names = rownames(ProbCert))
+  for(i in 1:length(ProbCert[,1])){
+
+    C_path_sum <- data.frame(row.names = rownames(ProbCert[i,]))
+    for(cl in labs_l){
+      AncPath <- GetAncestPath(tree = tree, class = cl, labels = T)
+      Outs <- c()
+      Sibs <- GetSiblings(tree = tree, class = cl)
+      if(length(AncPath) > 1){
+        cpaths <- data.frame(apply( ProbCert[i,][, AncPath], 1, sum))
+        for(n in AncPath[-1]){
+          outg <- grep(n, grep("OutGroup", names(ProbCert), value = T), value = T)
+          Outs <- append(Outs, outg)
+        }
+        if(length(Outs) > 1){
+          cpaths_out <- data.frame(apply(ProbCert[i,][, Outs], 1, sum))
+        }else{
+          cpaths_out <- data.frame(ProbCert[i,][,Outs])
+        }
+        if(length(Sibs) > 1){
+          sibs_out <- data.frame(apply(ProbCert[i,][, Sibs], 1, sum))
+        }else{
+          sibs_out <- data.frame(ProbCert[i,][,Sibs])
+        }
+      }else{
+        cpaths <- data.frame( ProbCert[i,][, AncPath])
+        cpaths_out <- data.frame(0)
+        sibs_out <- data.frame(0)
+      }
+
+      cpaths = cpaths - cpaths_out - sibs_out ### ****
+
+      colnames(cpaths) <- cl
+      C_path_sum <- cbind(C_path_sum, cpaths)
+    }
+    C_path_sum <- C_path_sum[order(C_path_sum,decreasing = T)]
+
+    classL <- names(C_path_sum[1])
+
+    df <- rbind(df, data.frame(row.names = rownames(ProbCert[i,]),
+                               Certainty = C_path_sum[,classL],
+                               Projection = classL))
+  }
+  return(df)
+}
+
+
+#' A function for evalating the uncertainty.
+#' @param ScoreObs P_path_prod for observed scores
+#' @param ProbCert Certainty scores.
+#' @param tree a tree topology with which hrf model was trained on. 'phylo' format.
+ScoreEval <- function(ScoreObs, ProbCert, tree, alpha=0){
 
   df <- data.frame(row.names = rownames(ScoreObs))
   for(i in 1:length(ProbCert[,1])){
     #candits <- colnames(ProbCert)[ProbCert[i,] > alpha]
     #candits <- CandidateDetector(PCertVector = ProbCert.logic[i,], tree=tree)
-    #candits <- CandidateDetector2(PCertVector = ProbCert[i,], tree=tree, alpha=alpha)
-    candits <- CandidateDetector3(PCertVector = ProbCert[i,], tree=tree, alphas=alpha)
+    candits <- CandidateDetector2(PCertVector = ProbCert[i,], tree=tree, alpha=alpha)
+    #candits <- CandidateDetector3(PCertVector = ProbCert[i,], tree=tree, alphas=alpha)
     if(length(candits) == 0){
       classL <- "Undetermined"
       classU <- max(ProbCert[i,])
       classS <- max(ScoreObs[i,])
     }else if(length(candits) == 1){
       classL <- candits
-      classU <- ProbCert[i,classL]
-      classS <- ScoreObs[i,classL]
+      #classU <- ProbCert[i,classL]
+      AncPath <- GetAncestPath(tree = tree, class = classL, labels = T)
+      if(length(AncPath) > 1){classU <- rowMeans(ProbCert[i, AncPath])}else{classU <- ProbCert[i, AncPath]}
+      classS <- ScoreObs[i, classL]
     }else{
       classL <- colnames(ScoreObs[i,candits])[apply(ScoreObs[i,candits], 1, which.max)]
       #classL <- colnames(ProbCert[i,candits])[apply(ProbCert[i,candits], 1, which.max)]
-      classU <- ProbCert[i,classL]
-      classS <- ScoreObs[i,classL]
+      #classU <- ProbCert[i,classL]
+      AncPath <- GetAncestPath(tree = tree, class = classL, labels = T)
+      if(length(AncPath) > 1){classU <- rowMeans(ProbCert[i, AncPath])}else{classU <- ProbCert[i, AncPath]}
+      classS <- ScoreObs[i, classL]
     }
 
     df <- rbind(df, data.frame(row.names = rownames(ProbCert[i,]),

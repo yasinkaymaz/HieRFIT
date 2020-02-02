@@ -14,16 +14,16 @@ RefMod <- setClass(Class = "RefMod",
 #' @param RefData Reference data from which class labels will be projected on Query data.
 #' @param ClassLabels A list of class labels for cells/samples in the Data matrix (Ref). Same length as colnames(Ref).
 #' @param method The model training method, "rf" for random forest, "svmLinear" for support vector machine, "hrf" for hierarchical random forest. Default is "hrf"
-#' @param TreeFile An input file to create a hierarchical tree for relationship between class labels. Default is null but required if method 'hrf' is chosen.
+#' @param Tree An input file to create a hierarchical tree for relationship between class labels. Default is null but required if method 'hrf' is chosen.
 #' @usage  pbmc.refmod <- CreateRef(RefData = as.matrix(pbmc@data), ClassLabels = pbmc@meta.data$ClusterNames_0.6, TreeFile = pbmc3k_tree)
-CreateHieR <- function(RefData, ClassLabels, TreeTable=NULL, method="hrf", thread=NULL, ...){
+CreateHieR <- function(RefData, ClassLabels, Tree=NULL, method="hrf", thread=NULL, ...){
 
   ClassLabels <- FixLab(xstring = ClassLabels)
 
-  if(is.null(TreeTable)){
+  if(is.null(Tree)){
     tree <- CreateDeNovoTree(RefData, ClassLabels)
   }else{
-    tree <- CreateTree(treeTable = TreeTable)
+    if(class(Tree) == "phylo"){tree <- Tree}else{tree <- CreateTree(treeTable = Tree)}
   }
 
   try(if(missing(tree)|| missing(ClassLabels) || missing(RefData))
@@ -37,14 +37,15 @@ CreateHieR <- function(RefData, ClassLabels, TreeTable=NULL, method="hrf", threa
 
   model <- HieRandForest(RefData = RefData,
                          ClassLabels = ClassLabels,
-                         tree, thread = thread, ...)
+                         tree = tree, thread = thread, ...)
   refObj <- new(Class = "RefMod",
                 model = model,
                 modtype = method)
   refObj@tree[[1]] <- tree
   #' !!! alternatively, split the ref 10%-90% and use 10% for learning alphas
   #alpha <- DetermineAlpha(refmod = refObj, RefData = RefData, Prior = ClassLabels)
-  alpha <- DetermineAlpha3(refmod = refObj, RefData = RefData, Prior = ClassLabels)
+  alpha <- 0
+  #alpha <- DetermineAlpha3(refmod = refObj, RefData = RefData, Prior = ClassLabels)
   refObj@alpha[[1]] <- alpha
   #foreach::registerDoSEQ()
   return(refObj)
@@ -80,28 +81,41 @@ DetermineAlpha3 <- function(refmod, RefData, Prior){
   succsLabs <- as.character(Hierobj@Evaluation[succs,]$Projection)
   succsCerst <- Hierobj@CertaintyValues[succs,]
 
+  fails <- Hierobj@Evaluation$Projection != Hierobj@Prior
+  failsLabs <- as.character(Hierobj@Evaluation[fails,]$Projection)
+  failsCerst <- Hierobj@CertaintyValues[fails,]
+
   alpha.list <- list()
-  for(node.lab in labs_l[labs_l %in% succsLabs]){
+  for(node.lab in labs_l[labs_l %in% failsLabs]){
     AncPath <- GetAncestPath(tree = tree, class = node.lab, labels = T)
     al.list <- NULL
     for(i in 1:length(AncPath)){
-      mincer <- min(succsCerst[succsLabs == node.lab, AncPath[i]])
-      al.list <- append(al.list, mincer)
+      if(any(failsLabs == node.lab)){
+        maxcer <- mean(failsCerst[failsLabs == node.lab, AncPath[i]])
+      }else{
+        maxcer <- 0
+      }
+      al.list <- append(al.list, maxcer)
     }
     names(al.list) <- AncPath
     alpha.list[[node.lab]] <- al.list
   }
-  alpha.list
-  for(node.lab in labs_l[!labs_l %in% succsLabs]){
+
+  for(node.lab in labs_l[!labs_l %in% failsLabs]){
     AncPath <- GetAncestPath(tree = tree, class = node.lab, labels = T)
     al.list <- NULL
     for(n in 1:length(AncPath)){
       list.n <- NULL
       for(i in 1:length(alpha.list)){
-        n.cer <- alpha.list[[i]][AncPath[n]]
+        if(AncPath[n] %in% names(alpha.list[[i]])){
+          n.cer <- alpha.list[[i]][AncPath[n]]
+        }else{
+          n.cer <- 0
+          names(n.cer) <- AncPath[n]
+        }
         list.n <- append(list.n, n.cer)
       }
-      list.n <- min(list.n, na.rm = T)
+      list.n <- mean(list.n, na.rm = T)
       al.list <- append(al.list, list.n)
     }
     names(al.list) <- AncPath
@@ -288,7 +302,7 @@ NodeTrainer3 <- function(Rdata, tree, node, f_n=200, tree_n=500, switchBox='off'
   node.Data <- SubsetTData(Tdata = Rdata, tree = tree, node = node)
   node.ClassLabels <- node.Data$ClassLabels
   node.Data <- droplevels(subset(node.Data, select=-c(ClassLabels)))
-  node.Data <- node.Data[, apply(node.Data, 2, var) != 0]
+  #node.Data <- node.Data[, apply(node.Data, 2, var) != 0]
 
   node.Data$ClassLabels <- node.ClassLabels
 
@@ -314,6 +328,8 @@ NodeTrainer3 <- function(Rdata, tree, node, f_n=200, tree_n=500, switchBox='off'
   node.ClassLabels <- node.Data$ClassLabels
   node.Data <- droplevels(subset(node.Data, select=-c(ClassLabels)))
 
+  node.Data <- node.Data[, apply(node.Data, 2, var) != 0]
+
     #First select the highly variable genes that correlate with the PCs
     P_dict <- FeatureSelector(Data = node.Data,
                               ClassLabels = node.ClassLabels,
@@ -326,7 +342,10 @@ NodeTrainer3 <- function(Rdata, tree, node, f_n=200, tree_n=500, switchBox='off'
                                num = f_n,
                                ...)
 
-  node.Data <- droplevels(subset(node.Data, select=c(P_dict)))
+    pool <- PairsPool(P_dict = P_dict, node.Data = node.Data, node.ClassLabels = node.ClassLabels)
+
+  #node.Data <- droplevels(subset(node.Data, select=c(P_dict)))
+    node.Data <- droplevels(subset(node.Data, select=c(pool)))
   node.Data$ClassLabels <- node.ClassLabels
 
   #--#
@@ -447,6 +466,40 @@ FeatureSelector2 <- function(Data, ClassLabels, num = 200, ...) {
     pick.fea <- c(pick.fea, rownames(head(fea.p, round(num/length(cls)))))
   }
   return(pick.fea)
+}
+
+#' @param
+#' @usage  genePairs <- FindPairs(P_dict, node.Data, node.ClassLabels)
+PairsPool <- function(P_dict, node.Data, node.ClassLabels, score_threshold=0.5){
+  library(tspair)
+  genes <- P_dict
+  df <- t(node.Data)
+
+  genePairs <- c()
+  pairs.pool <- c()
+
+  for(c in unique(as.character(node.ClassLabels))){
+    genes <- P_dict
+    df <- t(node.Data)
+    #create the gene pairs:
+    data <- df[P_dict, ]
+
+    node.labs <- as.character(node.ClassLabels)
+    node.labs[which(node.labs != c)] <- "A"
+    node.labs[which(node.labs == c)] <- "B"
+
+    while(length(genes) >= 2){
+      tsp1 <- tspcalc(as.matrix(data), node.labs)
+      pairs <- rownames(tsp1$tspdat)
+      if((!pairs[1] == pairs[2]) && (tsp1$tspscore > score_threshold)){
+        pairs.pool <- append(pairs.pool,pairs[1])
+        pairs.pool <- append(pairs.pool,pairs[2])
+      }
+      genes <- genes[!genes %in% pairs]
+      data <- data[genes,]
+    }
+  }
+  return(unique(pairs.pool))
 }
 
 

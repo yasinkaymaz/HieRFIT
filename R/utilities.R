@@ -217,6 +217,29 @@ RAMmerger <- function(RatObj, MouseObj){
 
 
 
+GetSiblings <- function(tree, class, labels=FALSE){
+
+  labs_l <- c(tree$tip.label, tree$node.label)
+  Node <- match(class, labs_l)
+  parent <- tree$edge[which(x = tree$edge[, 2] == Node), ][1]
+
+  #labs_s <- c(tree$tip.label, tree$node.label)
+  labs_s <- labs_l[!labs_l %in% c(class, "TaxaRoot")]
+
+  siblings <- c()
+  for(cl in labs_s){
+    Node.sib <- match(cl, labs_l)
+    par.sib <- tree$edge[which(x = tree$edge[, 2] == Node.sib), ][1]
+
+    if( par.sib == parent){
+      #print(cl)
+      siblings <- append(siblings, cl)
+    }
+  }
+
+  return(siblings)
+}
+
 
 #' A function to determine the size of intersection between ancestors of True class and Predicted class
 #' @param t true class
@@ -258,7 +281,7 @@ EvalPred <- function(t, p, tree){
     }
   }else{
     if(parent.t == parent.p){
-      out <- "Correct_sibling_node"
+      out <- "Incorrect_node_sibling"
     }else if(Node.p %in% children){
       out <- "Correct_children_node"
     }else if(p %in% grandChilds){
@@ -302,7 +325,7 @@ hPRF <- function(tpT, tree, BetaSq=1, ND_term="Undetermined"){
   tpT <- tpT[tpT[, 2] != ND_term, ]
   #Calculate correctness
   metrics <- c("Correct_node", "Correct_parent_node", "Correct_ancestral_node",
-  "Correct_sibling_node", "Correct_children_node", "Correct_grandchildren_node",
+  "Incorrect_node_sibling", "Correct_children_node", "Correct_grandchildren_node",
   "Incorrect_clade", "NotDefined")
   tpT$Eval <- apply(tpT, 1, function(x) EvalPred(t = x[1], p = x[2], tree = tree) )
   evals <- table(tpT$Eval)/tpT.size

@@ -45,7 +45,7 @@ newPBMC <- NormalizeData(newPBMC)
 
 Load the reference data
 ```{r}
-pbmc <- get(load("pbmc3k_final.Rda"))
+pbmc <- get(load("pbmc3k_final.Rds"))
 
 #You need to update it to the new Seurat format if necessary:
 pbmc <- UpdateSeuratObject(pbmc)
