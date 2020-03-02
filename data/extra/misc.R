@@ -522,3 +522,7 @@ Modeller <- function(RefData, ClassLabels=NULL, mod.meth="rf", thread=NULL, tree
 
   return(model)
 }
+
+colMax <- function(data) sapply(data, max, na.rm = TRUE)
+colMin <- function(data) sapply(data, min, na.rm = TRUE)
+

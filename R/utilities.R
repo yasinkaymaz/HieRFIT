@@ -1,5 +1,190 @@
 #Utility functions:
 
+NoiseInject <- function(RefData, ClassLabels, refmod){
+  NoisedRef <- list()
+  Caldata <- RefData
+  rownames(Caldata) <- FixLab(rownames(Caldata))#Not necessary
+  features <- NULL
+  for( i in names(refmod@model)){ features <- append(features, refmod@model[[i]]$finalModel$xNames)}
+  features <- unique(features)
+  Caldata <- Caldata[features, ]
+  CalY <- FixLab(ClassLabels)
+  Caldata.noised <- Caldata
+
+  # max(table(CalY))  #For balancing the class data
+  # Caldata[, CalY == unique(CalY)[1]]
+
+  rands <- seq(1:20)
+  CaldataFull <- Caldata
+  for(r in rands){
+    for(x in 1:length(Caldata[1,])){
+      nz_idx <- which(!Caldata[,x] %in% c(0))
+      if(r > length(nz_idx)){
+        r = length(nz_idx)-1
+      }
+      idx.to.set.zero <- sample(nz_idx, r)
+      Caldata.noised[idx.to.set.zero, x] <- 0
+    }
+    CaldataFull <- cbind(CaldataFull, Caldata.noised)
+  }
+
+  TaxaOutdata <- Caldata[, sample(colnames(Caldata), size = 500)]#Replace 500 with an adaptive.
+  TaxaOutdata <- Shuffler(df = TaxaOutdata)
+  CaldataFull <- cbind(CaldataFull, TaxaOutdata)
+
+  colnames(CaldataFull) <- make.names(colnames(CaldataFull), unique = TRUE)
+  CalYFull <- c(rep(CalY, length(rands)+1), rep("TaxaOut", 500))
+
+  NoisedRef[["data"]] <- CaldataFull
+  NoisedRef[["Y"]] <- CalYFull
+
+  return(NoisedRef)
+}
+
+
+ProbTraverser <- function(Query, refmod){
+
+  rownames(Query) <- FixLab(xstring = rownames(Query))
+  node.list <- DigestTree(tree = refmod@tree[[1]])
+  #Create a table for storing node probabilities.
+  Pvotes <- data.frame(row.names = colnames(Query))
+    for(i in node.list){
+      nodeModel <- refmod@model[[as.character(i)]]
+      #Create QueData:
+      P_dicts <- FixLab(xstring = nodeModel$finalModel$xNames)
+      nodeQueData <- Query[which(rownames(Query) %in% P_dicts), ]
+      nodeQueData <- t(nodeQueData)
+      #Add the missing features matrix
+      mp <- P_dicts[which(!P_dicts %in% colnames(nodeQueData))]
+      mp_df <- data.frame(matrix(0,
+                                 ncol = length(mp),
+                                 nrow = length(colnames(Query))))
+      colnames(mp_df) <- mp
+      nodeQueData <- cbind(nodeQueData, mp_df)
+      #Tally votes for class from the local model:
+      nodePvotes <- PvoteR(model = nodeModel, QueData = nodeQueData)
+      Pvotes <- cbind(Pvotes, nodePvotes)
+    }
+
+  return(Pvotes)
+}
+
+
+GetSigMods2 <- function(RefData, ClassLabels, refmod){
+
+  Cal.data <- NoiseInject(RefData = RefData, ClassLabels = ClassLabels, refmod = refmod)
+  Pvotes <- ProbTraverser(Query = Cal.data[["data"]], refmod = refmod)
+  labs_l <- c(refmod@tree[[1]]$tip.label, refmod@tree[[1]]$node.label)
+  votes <- data.frame(Prior=Cal.data[["Y"]], Pvotes)
+  node.list <- DigestTree(tree = refmod@tree[[1]])
+  for(i in node.list){
+    nodeModel <- refmod@model[[as.character(i)]]
+    outGname <- grep("OutGroup", nodeModel$finalModel$classes, value=T)
+    Leafs <- NULL
+    classes <- nodeModel$finalModel$classes[! nodeModel$finalModel$classes %in% outGname]
+    node.dict <- list()
+    Labs <- votes$Prior
+    for(l in classes){
+      if(l %in% refmod@tree[[1]]$tip.label){
+        node.dict[[l]] <- l
+      }else{
+        leaf <- GetChildNodeLeafs(tree = refmod@tree[[1]], node = match(l, labs_l))
+        leaf <- leaf[which(lapply(leaf, length)>0)]
+        for(j in 1:length(leaf)){
+          Leafs <- append(Leafs, leaf[[j]])
+        }
+        node.dict[[l]] <- Leafs
+        Leafs <- NULL
+      }
+      Labs <- ifelse(Labs %in% node.dict[[l]], l, as.character(Labs))
+    }
+    Labs <- ifelse(!Labs %in% c(names(node.dict), node.dict), outGname, as.character(Labs))
+    print(table(Labs))
+    dfr.full <- data.frame(Prior=Labs, votes[, nodeModel$finalModel$classes])
+    mlrmod <- nnet::multinom(Prior ~ ., data = dfr.full, model=FALSE)
+    #refmod@model[[as.character(i)]]$mlr <- stripGlmModel(mlrmod)
+    refmod@model[[as.character(i)]]$mlr <- mlrmod
+  }
+  return(refmod)
+}
+
+
+GetSigMods <- function(RefData, ClassLabels, refmod){
+
+  Cal.data <- NoiseInject(RefData = RefData, ClassLabels = ClassLabels, refmod = refmod)
+  Pvotes <- ProbTraverser(Query = Cal.data[["data"]], refmod = refmod)
+
+  votes <- data.frame(Prior=Cal.data[["Y"]], Pvotes)
+  classes <- unique(votes$Prior)
+  labs_l <- c(refmod@tree[[1]]$tip.label, refmod@tree[[1]]$node.label)
+  sigmoidMods <- list()
+
+  for(n in 1:length(labs_l)){
+    if(labs_l[n] == "TaxaRoot"){next}
+    Leafs <- NULL
+    if(labs_l[n] %in% refmod@tree[[1]]$tip.label){
+      Leafs <- labs_l[n]
+    }else{
+      leaf <- GetChildNodeLeafs(tree = refmod@tree[[1]], node = n)
+      leaf <- leaf[which(lapply(leaf, length)>0)]
+      for(j in 1:length(leaf)){
+        Leafs <- append(Leafs, leaf[[j]])
+      }
+    }
+    votes <- votes[order(votes[[labs_l[n]]]),]
+    Labs <- ifelse(votes$Prior %in% Leafs, 1, 0)
+    dfr <- data.frame(votes[[labs_l[n]]], Labs)
+    colnames(dfr) <- c("x","y")
+    # training a logistic regression model on the cross validation dataset
+    glmmod <- glm(y~x, data = dfr, family = binomial, maxit = 100, y=FALSE, model=FALSE)
+    sigmoidMods[[labs_l[n]]] <- stripGlmModel(glmmod)
+  }
+  outs <- grep("OutGroup", names(votes), value = T)
+  for(x in 1:length(outs)){
+    int.node <- gsub("_OutGroup", "", outs[x])
+    n <- match(int.node, labs_l)
+    Leafs <- NULL
+    leaf <- GetChildNodeLeafs(tree = refmod@tree[[1]], node = n)
+    leaf <- leaf[which(lapply(leaf, length)>0)]
+    for(j in 1:length(leaf)){
+      Leafs <- append(Leafs, leaf[[j]])
+    }
+    votes <- votes[order(votes[[outs[x]]]),]
+    Labs <- ifelse(votes$Prior %in% Leafs, 0, 1)#Labels (1,0) reversed since outgroup
+    dfr <- data.frame(votes[[outs[x]]], Labs)
+    colnames(dfr) <- c("x","y")
+    # training a logistic regression model on the cross validation dataset
+    glmmod <- glm(y~x, data = dfr, family = binomial, maxit = 100, y=FALSE, model=FALSE)
+    sigmoidMods[[outs[x]]] <- stripGlmModel(glmmod)
+  }
+
+  return(sigmoidMods)
+}
+
+
+
+stripGlmModel = function(cm) {
+  cm$y = c()
+  cm$model = c()
+  cm$residuals = c()
+  cm$fitted.values = c()
+  cm$effects = c()
+  cm$qr$qr = c()
+  cm$linear.predictors = c()
+  cm$weights = c()
+  cm$prior.weights = c()
+  cm$data = c()
+  cm$family$variance = c()
+  cm$family$dev.resids = c()
+  cm$family$aic = c()
+  cm$family$validmu = c()
+  cm$family$simulate = c()
+  attr(cm$terms,".Environment") = c()
+  attr(cm$formula,".Environment") = c()
+  return(cm)
+}
+
+
 DigestTree <- function(tree) {
   all.nodes <- unique(tree$edge[,1])
   return(all.nodes)
@@ -165,8 +350,20 @@ EvaluateCertainty <- function(RefSeuObj, IdentityCol, RefMod, Uinter=20, perm_n=
   return(hPRF_table)
 }
 
+Rander <- function(df){
+  if(dim(df)[1] > 1000){Sn <- 1000}else{Sn <- dim(df)[1]}
+  dfr <- as.matrix(df[sample(row.names(df), size = Sn),])
+  for(i in 1:length(dfr[1,])){#for each col:
+    for(j in 1:length(dfr[,1])){#for each row:
+      dfr[,i] <- sample(dfr[,i])
+      dfr[j,] <- sample(dfr[j,])
+    }
+  }
+  return(as.data.frame(dfr))
+}
+
 RandomizeR <- function(df, n=10){
-  set.seed(192939)
+  #set.seed(192939)
   dfRand <- NULL
   for (i in 1:n){
     dfR <- df[sample(nrow(df)), sample(ncol(df))]
@@ -177,6 +374,23 @@ RandomizeR <- function(df, n=10){
   dfRand <- dfRand[sample(rownames(dfRand),size = nrow(df)),]
   return(dfRand)
 }
+
+FakeRandomizeR <- function(df, seed.num=192939){
+  set.seed(seed.num)
+  dfRand <- df
+  rownames(dfRand) <- sample(rownames(df))
+  colnames(dfRand) <- sample(colnames(df))
+  return(dfRand)
+}
+
+Shuffler <- function(df){
+  dfr <- t(apply(df, 1, sample))
+  dfr <- apply(dfr, 2, sample)
+  colnames(dfr) <- colnames(df)
+  rownames(dfr)<-rownames(df)
+  return(as.data.frame(dfr))
+}
+
 #' Homology mapping via orthologous genes between mouse and rat.
 Gmor <- function(RatGenes){
   # This function retrieves mouse homolog associated gene names of Rat genes.
@@ -335,4 +549,103 @@ hPRF <- function(tpT, tree, BetaSq=1, ND_term="Undetermined"){
   evals <- c(evals, mm.x)
   evals <- evals[order(names(evals))]
   return(c(Precision=hP, Recall=hR, Fmeasure=hF, evals, UndetectedRate=ND.rate))
+}
+
+
+evaluate <- function(TrueLabels, PredLabels, Indices = NULL, HierModPath=NULL){
+  "
+  This function was taken from https://github.com/tabdelaal/scRNAseq_Benchmark
+  "
+  #true_lab <- unlist(read.csv(TrueLabelsPath))
+  #pred_lab <- unlist(read.csv(PredLabelsPath))
+  true_lab <- TrueLabels
+  pred_lab <- PredLabels
+
+  true_lab <- FixLab(xstring = true_lab)
+  pred_lab <- FixLab(xstring = pred_lab)
+
+  if (! is.null(Indices)){
+    true_lab <- true_lab[Indices]
+    pred_lab <- pred_lab[Indices]
+  }
+
+  if(!is.null(HierModPath)){
+
+    if(class(HierModPath)[1] == "RefMod"){
+      refmod <- HierModPath
+    }else{
+      suppressPackageStartupMessages(library(HieRFIT))
+      refmod <- LoadHieRMod(fileName=HierModPath)
+    }
+
+    hPRFtab <- hPRF(tpT = as.data.frame(cbind(true_lab, pred_lab)), tree = refmod@tree[[1]])
+
+    }else{hPRFtab <- NULL}
+
+  unique_true <- unlist(unique(true_lab))
+  unique_pred <- unlist(unique(pred_lab))
+
+  unique_all <- unique(c(unique_true,unique_pred))
+  conf <- table(true_lab,pred_lab)
+  pop_size <- rowSums(conf)
+
+  pred_lab = gsub('Node..','Node',pred_lab)
+
+  conf_F1 <- table(true_lab,pred_lab,exclude = c('Undetermined',
+                                                 'unassigned',
+                                                 'Unassigned',
+                                                 'Unknown',
+                                                 'rand',
+                                                 'Node',
+                                                 'Int.Node',
+                                                 'ambiguous',
+                                                 'unknown'))
+
+  F1 <- vector()
+  sum_acc <- 0
+
+  for (i in c(1:length(unique_true))){
+    findLabel = colnames(conf_F1) == row.names(conf_F1)[i]
+    if(sum(findLabel)){
+      prec <- conf_F1[i,findLabel] / colSums(conf_F1)[findLabel]
+      rec <- conf_F1[i,findLabel] / rowSums(conf_F1)[i]
+      if (prec == 0 || rec == 0){
+        F1[i] = 0
+      } else{
+        F1[i] <- (2*prec*rec) / (prec + rec)
+      }
+      sum_acc <- sum_acc + conf_F1[i,findLabel]
+    } else {
+      F1[i] = 0
+    }
+  }
+
+  pop_size <- pop_size[pop_size > 0]
+
+  names(F1) <- names(pop_size)
+
+  med_F1 <- median(F1)
+  mean_F1 <- mean(F1)
+
+  total <- length(pred_lab)
+  num_unlab <- sum(pred_lab == 'Undetermined') +
+    sum(pred_lab == 'unassigned') +
+    sum(pred_lab == 'Unassigned') +
+    sum(pred_lab == 'rand') +
+    sum(pred_lab == 'Unknown') +
+    sum(pred_lab == 'unknown') +
+    sum(pred_lab == 'Node') +
+    sum(pred_lab == 'Int.Node') +
+    sum(pred_lab == 'ambiguous')
+  per_unlab <- num_unlab / total
+
+  num_Interlab <- sum(pred_lab == 'Node') +
+    sum(pred_lab == 'Int.Node')
+  per_Interlab <- num_Interlab / total
+
+  acc <- sum_acc/sum(conf_F1)
+
+  result <- list(Conf = conf, MeanF1=mean_F1, MedF1 = med_F1, F1 = F1, Acc = acc, PercInter= per_Interlab, PercUnl = per_unlab, PopSize = pop_size, hPRF=hPRFtab)
+
+  return(result)
 }

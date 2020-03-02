@@ -8,6 +8,7 @@ RefMod <- setClass(Class = "RefMod",
                    slots = c(model = "list",
                              tree = "list",
                              alpha = "list",
+                             sigmoids = "list",#redundant
                              modtype = "character"))#Add treeTable
 
 #' The main function for creating a reference model.
@@ -47,6 +48,9 @@ CreateHieR <- function(RefData, ClassLabels, Tree=NULL, method="hrf", thread=NUL
   alpha <- 0
   #alpha <- DetermineAlpha3(refmod = refObj, RefData = RefData, Prior = ClassLabels)
   refObj@alpha[[1]] <- alpha
+  #Get sigmoid functions for probability calibrations:
+  #refObj@sigmoids <- GetSigMods(RefData = RefData, ClassLabels = ClassLabels, refmod = refObj)
+  refObj <- GetSigMods2(RefData = RefData, ClassLabels = ClassLabels, refmod = refObj)
   #foreach::registerDoSEQ()
   return(refObj)
 }
@@ -172,10 +176,24 @@ HieRandForest <- function(RefData, ClassLabels, tree, thread=3, RPATH=NULL, ...)
 
   node.list <- DigestTree(tree = tree)
   hiemods <- vector("list", length = max(node.list))
-  var_cutoff=0.1
+  # var_cutoff=0.05
 
-  Rdata <- RefData[which(apply(RefData, 1, var) > var_cutoff),]
-  Rdata <- as.data.frame(t(Rdata))
+  #Rdata <- RefData[which(apply(RefData, 1, var) > var_cutoff),]
+  # tabl <- table(ClassLabels)
+  #
+  # Pool <- NULL
+  # for(cc in names(tabl)){
+  #   print(cc)
+  #   #SampSize.min instead of tabl[cc]
+  #   nonzeroFeatures <- rownames(RefData)[rowSums(RefData[, ClassLabels == cc] != 0)/tabl[cc] > var_cutoff]
+  #   Pool <- append(Pool, nonzeroFeatures)
+  # }
+  # Pool <- unique(sort(Pool))
+  #
+  # Rdata <- RefData[which(rownames(RefData) %in% Pool),]
+
+  # Rdata <- as.data.frame(t(Rdata))
+  Rdata <- as.data.frame(t(RefData))
   colnames(Rdata) <- FixLab(xstring = colnames(Rdata))
   Rdata$ClassLabels <- factor(make.names(ClassLabels))
 
@@ -190,6 +208,8 @@ HieRandForest <- function(RefData, ClassLabels, tree, thread=3, RPATH=NULL, ...)
 
       #hiemods[[i]] <- NodeTrainer(Rdata = Rdata, tree = tree, node = i, ...)
       hiemods[[i]] <- NodeTrainer3(Rdata = Rdata, tree = tree, node = i, ...)
+      #hiemods[[i]] <- NodeTrainer4(Rdata = Rdata, tree = tree, node = i, ...)
+      #hiemods[[i]] <- NodeTrainer5(Rdata = Rdata, tree = tree, node = i, ...)
       p=p+1
     } #closes the for loop.
 
@@ -296,8 +316,104 @@ NodeTrainer <- function(Rdata, tree, node, f_n=200, tree_n=500, ...){
   return(node.mod)
 }
 
-
 NodeTrainer3 <- function(Rdata, tree, node, f_n=200, tree_n=500, switchBox='off', ...){
+
+  node.Data <- SubsetTData(Tdata = Rdata, tree = tree, node = node)
+  #node.ClassLabels <- node.Data$ClassLabels
+  #node.Data <- droplevels(subset(node.Data, select=-c(ClassLabels)))
+  #node.Data <- node.Data[, apply(node.Data, 2, var) != 0]
+
+  #node.Data$ClassLabels <- node.ClassLabels
+
+  #Generate outgroup data for the node:
+  #1. check the node: is.not.Root?
+  labs_l <- c(tree$tip.label, tree$node.label)
+  if(labs_l[node] != "TaxaRoot"){
+    childNodes <- GetChildNodeLeafs(tree = tree, node = node)
+    childLeafs <- NULL
+    for (i in which(lapply(childNodes, length) > 0)){
+      childLeafs <- c(childLeafs, childNodes[i][[1]])
+    }
+    outGroupLeafs <- tree$tip.label[!tree$tip.label %in% childLeafs]
+    node.outData <- droplevels(Rdata[which(Rdata$ClassLabels %in% outGroupLeafs), ])
+    if(dim(node.outData)[1] > 500){
+      node.outData <- node.outData[sample(rownames(node.outData), size = 500), ]#500 can be replaced with a better #
+    }
+    node.outData <- droplevels(subset(node.outData, select=c(colnames(node.Data))))
+  }else{
+    #Create OurGroup for the TaxaRoot
+    node.outData <- droplevels(Rdata[sample(rownames(Rdata), size = 500), ])
+    node.outData <- droplevels(subset(node.outData, select=c(colnames(node.Data))))
+    node.outData <- droplevels(subset(node.outData, select=-c(ClassLabels)))
+    node.outData <- Shuffler(df = node.outData)
+  }
+  node.outData$ClassLabels <- paste(labs_l[node], "OutGroup", sep="_")
+  node.Data <- rbind(node.Data, node.outData)
+
+  node.ClassLabels <- node.Data$ClassLabels
+  node.Data <- droplevels(subset(node.Data, select=-c(ClassLabels)))
+
+  node.Data <- node.Data[, apply(node.Data, 2, var) != 0]
+#$$$
+  #Select top highly varible genes:
+  vmr <- Seurat::FindVariableFeatures(t(expm1(node.Data)),verbose=F)
+  vmr <- vmr[order(vmr$vst.variance.standardized, decreasing = T),]
+  P_dict <- head(rownames(vmr), 4000)
+
+  node.Data <- droplevels(subset(node.Data, select=c(P_dict)))
+#$$$
+    #First select the highly variable genes that correlate with the PCs
+    P_dict <- FeatureSelector(Data = node.Data,
+                              ClassLabels = node.ClassLabels,
+                              num = 2000,
+                              ...)
+    node.Data <- droplevels(subset(node.Data, select=c(P_dict)))
+    #Then, select the genes as predictors if statistically DE between the classes.
+    P_dict <- FeatureSelector2(Data = node.Data,
+                               ClassLabels = node.ClassLabels,
+                               num = f_n,
+                               ...)
+
+    #pool <- PairsPool(P_dict = P_dict, node.Data = node.Data, node.ClassLabels = node.ClassLabels)
+
+    node.Data <- droplevels(subset(node.Data, select=c(P_dict)))
+    #node.Data <- droplevels(subset(node.Data, select=c(pool)))
+
+  #node.Data$ClassLabels <- node.ClassLabels
+  #--#
+  train.control <- caret::trainControl(method="oob",
+                                       returnData = FALSE,
+                                       savePredictions = "none",
+                                       returnResamp = "none",
+                                       allowParallel = TRUE,
+                                       classProbs =  TRUE,
+                                       trim = TRUE)
+  # node.mod <- caret::train(ClassLabels~.,
+  #                          data = node.Data,
+  #                          method = "rf",
+  #                          norm.votes = TRUE,
+  #                          importance = TRUE,
+  #                          proximity = FALSE,
+  #                          outscale = FALSE,
+  #                          preProcess = c("center", "scale"),
+  #                          ntree = tree_n,
+  #                          trControl = train.control, ...)
+  node.mod <- caret::train(x = node.Data,
+                           y = node.ClassLabels,
+                           method = "rf",
+                           norm.votes = TRUE,
+                           importance = TRUE,
+                           proximity = FALSE,
+                           outscale = FALSE,
+                           preProcess = c("center", "scale"),
+                           ntree = tree_n,
+                           trControl = train.control, ...)
+
+
+  return(node.mod)
+}
+
+NodeTrainer4 <- function(Rdata, tree, node, f_n=200, tree_n=500, PC_n=40, ...){
 
   node.Data <- SubsetTData(Tdata = Rdata, tree = tree, node = node)
   node.ClassLabels <- node.Data$ClassLabels
@@ -316,11 +432,21 @@ NodeTrainer3 <- function(Rdata, tree, node, f_n=200, tree_n=500, switchBox='off'
       childLeafs <- c(childLeafs, childNodes[i][[1]])
     }
     outGroupLeafs <- tree$tip.label[!tree$tip.label %in% childLeafs]
-    node.outData <- droplevels(Rdata[which(Rdata$ClassLabels %in% outGroupLeafs), ])
-    if(dim(node.outData)[1] > 500){
-      node.outData <- node.outData[sample(rownames(node.outData), size = 500), ]#500 can be replaced with a better #
+    SampSize.min <- min(table(Rdata$ClassLabels)[outGroupLeafs])
+    for(x in outGroupLeafs){
+      node.outData <- droplevels(Rdata[which(Rdata$ClassLabels == x), ])
+      node.outData <- node.outData[sample(rownames(node.outData), size = SampSize.min), ]
+      node.outData <- droplevels(subset(node.outData, select=c(colnames(node.Data))))
+      node.outData$ClassLabels <- paste(labs_l[node], "OutGroup", sep="_")
+      node.Data <- rbind(node.Data, node.outData)
     }
+  }else{
+    RandN <- median(table(node.ClassLabels))
+    node.outData <- droplevels(Rdata[sample(rownames(Rdata), size=RandN), ])
     node.outData <- droplevels(subset(node.outData, select=c(colnames(node.Data))))
+    node.ClassLabels <- node.Data$ClassLabels
+    node.outData <- droplevels(subset(node.outData, select=-c(ClassLabels)))
+    node.outData <- Shuffler(df = node.outData)
     node.outData$ClassLabels <- paste(labs_l[node], "OutGroup", sep="_")
     node.Data <- rbind(node.Data, node.outData)
   }
@@ -328,25 +454,16 @@ NodeTrainer3 <- function(Rdata, tree, node, f_n=200, tree_n=500, switchBox='off'
   node.ClassLabels <- node.Data$ClassLabels
   node.Data <- droplevels(subset(node.Data, select=-c(ClassLabels)))
 
-  node.Data <- node.Data[, apply(node.Data, 2, var) != 0]
+  #Here transform the node.Data into PC space:
+  #node.Data <- node.Data[, apply(node.Data, 2, var) != 0]
 
-    #First select the highly variable genes that correlate with the PCs
-    P_dict <- FeatureSelector(Data = node.Data,
-                              ClassLabels = node.ClassLabels,
-                              num = 2000,
-                              ...)
-    node.Data <- droplevels(subset(node.Data, select=c(P_dict)))
-    #Then, select the genes as predictors if statistically DE between the classes.
-    P_dict <- FeatureSelector2(Data = node.Data,
-                               ClassLabels = node.ClassLabels,
-                               num = f_n,
-                               ...)
+  #Select top highly varible genes:
+  vmr <- Seurat::FindVariableFeatures(t(expm1(node.Data)),verbose=F)
+  vmr <- vmr[order(vmr$vst.variance.standardized, decreasing = T),]
+  node.Data <- node.Data[, head(rownames(vmr), 2000)]
 
-    #pool <- PairsPool(P_dict = P_dict, node.Data = node.Data, node.ClassLabels = node.ClassLabels)
-
-    node.Data <- droplevels(subset(node.Data, select=c(P_dict)))
-    #node.Data <- droplevels(subset(node.Data, select=c(pool)))
-  node.Data$ClassLabels <- node.ClassLabels
+  pcatrain <- prcomp(node.Data, center = TRUE, scale=TRUE, rank. = PC_n)
+  PCs.sig <- selectSigPCs(pcatrain, node.ClassLabels)
 
   #--#
   train.control <- caret::trainControl(method="oob",
@@ -356,20 +473,133 @@ NodeTrainer3 <- function(Rdata, tree, node, f_n=200, tree_n=500, switchBox='off'
                                        allowParallel = TRUE,
                                        classProbs =  TRUE,
                                        trim = TRUE)
-  node.mod <- caret::train(ClassLabels~.,
-                           data = node.Data,
+
+  node.mod <- caret::train(x = pcatrain$x[,PCs.sig],
+                           y = node.ClassLabels,
                            method = "rf",
                            norm.votes = TRUE,
-                           importance = FALSE,
+                           importance = TRUE,
+                           proximity = FALSE,
+                           outscale = FALSE,
+                           #preProcess = c("center", "scale"),
+                           ntree = tree_n,
+                           trControl = train.control, ...)
+
+  node.mod[["trainPCA"]] <- pcatrain
+  return(node.mod)
+}
+
+NodeTrainer5 <- function(Rdata, tree, node, f_n=200, tree_n=500, ...){
+
+  node.Data <- SubsetTData(Tdata = Rdata, tree = tree, node = node)
+  node.ClassLabels <- node.Data$ClassLabels
+  node.Data <- droplevels(subset(node.Data, select=-c(ClassLabels)))
+  #node.Data <- node.Data[, apply(node.Data, 2, var) != 0]
+
+  node.Data$ClassLabels <- node.ClassLabels
+
+  #Generate outgroup data for the node:
+  #1. check the node: is.not.Root?
+  labs_l <- c(tree$tip.label, tree$node.label)
+  if(labs_l[node] != "TaxaRoot"){
+    childNodes <- GetChildNodeLeafs(tree = tree, node = node)
+    childLeafs <- NULL
+    for (i in which(lapply(childNodes, length) > 0)){
+      childLeafs <- c(childLeafs, childNodes[i][[1]])
+    }
+    outGroupLeafs <- tree$tip.label[!tree$tip.label %in% childLeafs]
+    SampSize.min <- min(table(Rdata$ClassLabels)[outGroupLeafs])
+    for(x in outGroupLeafs){
+      print(x)
+      node.outData <- droplevels(Rdata[which(Rdata$ClassLabels == x), ])
+      node.outData <- node.outData[sample(rownames(node.outData), size = SampSize.min), ]
+      node.outData <- droplevels(subset(node.outData, select=c(colnames(node.Data))))
+      node.outData$ClassLabels <- paste(labs_l[node], "OutGroup", sep="_")
+      node.Data <- rbind(node.Data, node.outData)
+    }
+  }
+
+
+  node.ClassLabels <- node.Data$ClassLabels
+  node.Data <- droplevels(subset(node.Data, select=-c(ClassLabels)))
+
+  # Pool <- NULL
+  # for(cc in names(tabl)){
+  #   #SampSize.min instead of tabl[cc]
+  #   nonzeroFeatures <- names(node.Data)[colSums(node.Data[node.ClassLabels == cc, ] != 0)/SampSize.min > .5]
+  #   Pool <- append(Pool, nonzeroFeatures)
+  # }
+  # Pool <- unique(sort(Pool))
+  #
+  # node.Data <- droplevels(subset(node.Data, select=c(Pool)))
+
+
+  #Select top highly varible genes:
+  vmr <- Seurat::FindVariableFeatures(t(expm1(node.Data)),verbose=F)
+  vmr <- vmr[order(vmr$vst.variance.standardized, decreasing = T),]
+  P_dict <- head(rownames(vmr), f_n)
+
+  node.Data <- droplevels(subset(node.Data, select=c(P_dict)))
+
+
+  #node.Data$ClassLabels <- node.ClassLabels
+  #--#
+  train.control <- caret::trainControl(method="oob",
+                                       returnData = FALSE,
+                                       savePredictions = "none",
+                                       returnResamp = "none",
+                                       allowParallel = TRUE,
+                                       classProbs =  TRUE,
+                                       trim = TRUE,
+                                       sampling = "down",
+                                       preProcOptions = list(thresh = 0.95,
+                                                             ICAcomp = 3,
+                                                             k = 5,
+                                                             freqCut = 95/5,
+                                                             uniqueCut = 10,
+                                                             cutoff = 0.9))
+
+  node.mod <- caret::train(x = node.Data,
+                           y = node.ClassLabels,
+                           method = "rf",
+                           norm.votes = TRUE,
+                           importance = TRUE,
                            proximity = FALSE,
                            outscale = FALSE,
                            preProcess = c("center", "scale"),
                            ntree = tree_n,
                            trControl = train.control, ...)
 
+
   return(node.mod)
 }
 
+selectSigPCs <- function(pcatrain, ClassLabels){
+  pcadata <- data.frame(pcatrain$x, ClassLabels = ClassLabels)
+  cls <- levels(ClassLabels)
+  PC_n <- length(pcatrain$x[1,])
+  ptab <- NULL
+  for(i in 1:PC_n){
+    PC.stats <- NULL
+    for(c in cls){
+      p.cl <- t.test(pcadata[pcadata$ClassLabels == c, i],
+                     pcadata[pcadata$ClassLabels != c, i])$p.value
+      PC.stats <- c(PC.stats, p.cl)
+    }
+    names(PC.stats) <- cls
+    pc.col <- paste("PC", i, sep = "")
+    ptab <- cbind(ptab, pc.col=PC.stats)
+  }
+
+  ptab <- as.data.frame(ptab)
+  colnames(ptab) <- colnames(pcadata)[-length(pcadata[1,])]
+  ptab <- ptab*length(cls)*PC_n#Correct for the multiple test. Bonferroni.
+  #Select only PCs which are significanly separating at least one of the class.
+  PCs.sig <- colnames(ptab[, apply(ptab < 0.05, 2 ,any)])
+
+  if(length(PCs.sig) == 0){PCs.sig <- paste(rep("PC", 3), 1:3, sep="")}
+  return(PCs.sig)
+}
 
 #' A function used internally for selecting genes based on their weight in the top principle components.
 #' @description p: pca object, pcs: number of PCs to include, num: number of genes from top and bottom.
