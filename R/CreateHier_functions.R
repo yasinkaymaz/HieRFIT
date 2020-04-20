@@ -3,23 +3,38 @@
 #' Reference class
 #' @slot model A list of models to be used.
 #' @slot tree A hierarchical tree representing class relationships.
-#' @slot modtype type of the model method used to create object.
+#' @slot mlr multinominal logistic regression model for probability calibration.
+#' @slot alhas list of alpha threshold of each class.
+#' @slot species stores the species of the data, default is "hsapiens".
 RefMod <- setClass(Class = "RefMod",
                    slots = c(model = "list",
                              tree = "list",
-                             alpha = "list",
-                             sigmoids = "list",#redundant
-                             modtype = "character"))#Add treeTable
+                             mlr = "list",
+                             alphas = "list",
+                             species = "character"))#Add treeTable
 
 #' The main function for creating a reference model.
 #' @param RefData Reference data from which class labels will be projected on Query data.
 #' @param ClassLabels A list of class labels for cells/samples in the Data matrix (Ref). Same length as colnames(Ref).
-#' @param method The model training method, "rf" for random forest, "svmLinear" for support vector machine, "hrf" for hierarchical random forest. Default is "hrf"
-#' @param Tree An input file to create a hierarchical tree for relationship between class labels. Default is null but required if method 'hrf' is chosen.
+#' @param Tree An input file to create a hierarchical tree for relationship between class labels. If stays null, a de novo tree is created.
+#' @param species The organism from which the reference data generated. Allowed species are scientific species names, e.g. 'Homo sapiens'.
+#' @param thread number of workers to be used for parallel processing. Default is Null, so serial processing.
 #' @usage  pbmc.refmod <- CreateRef(RefData = as.matrix(pbmc@data), ClassLabels = pbmc@meta.data$ClusterNames_0.6, TreeFile = pbmc3k_tree)
-CreateHieR <- function(RefData, ClassLabels, Tree=NULL, method="hrf", thread=NULL, ...){
-
+CreateHieR <- function(RefData, ClassLabels, Tree=NULL, species = "hsapiens", thread=NULL, injectNoise=FALSE, binarize=FALSE, ...){
+  options(warn=-1)
+  if(missing(ClassLabels) || missing(RefData)){
+    stop("Please, provide the required inputs! ClassLabels or RefData is missing.")
+  }
+  cat(paste("Species is", species, "\n"))
+  cat("Preparing the query data...\n")
+  RefData <- as.matrix(RefData)
+  rownames(RefData) <- FixLab(xstring = rownames(RefData))
+  RefData <- RefData[apply(RefData, 1, var) != 0, ]
   ClassLabels <- FixLab(xstring = ClassLabels)
+
+  if(binarize){
+    RefData <- as.matrix((RefData > 0) + 0)
+  }
 
   if(is.null(Tree)){
     tree <- CreateDeNovoTree(RefData, ClassLabels)
@@ -27,104 +42,112 @@ CreateHieR <- function(RefData, ClassLabels, Tree=NULL, method="hrf", thread=NUL
     if(class(Tree) == "phylo"){tree <- Tree}else{tree <- CreateTree(treeTable = Tree)}
   }
 
-  try(if(missing(tree)|| missing(ClassLabels) || missing(RefData))
-    stop("Please, provide the required inputs!"))
-
-    print("Training model... This may take some time... Please, be patient!")
-
   try(if(!identical(sort(tree$tip.label),
                    sort(unique(ClassLabels))))
     stop("Please, check class labels in the reference and tree file."))
 
+  if(injectNoise == TRUE){
+    noised.data <- NoiseInjecter(RefData = RefData, ClassLabels = ClassLabels, ...)
+    RefData <- noised.data[["data"]]
+    ClassLabels <- noised.data[["Y"]]
+  }
+
+  cat("Training model... This may take some time... Please, be patient!\n")
   model <- HieRandForest(RefData = RefData,
                          ClassLabels = ClassLabels,
                          tree = tree, thread = thread, ...)
+
   refObj <- new(Class = "RefMod",
                 model = model,
-                modtype = method)
+                species = species)
+
   refObj@tree[[1]] <- tree
-  #' !!! alternatively, split the ref 10%-90% and use 10% for learning alphas
-  #alpha <- DetermineAlpha(refmod = refObj, RefData = RefData, Prior = ClassLabels)
-  alpha <- 0
-  #alpha <- DetermineAlpha3(refmod = refObj, RefData = RefData, Prior = ClassLabels)
-  refObj@alpha[[1]] <- alpha
   #Get sigmoid functions for probability calibrations:
-  #refObj@sigmoids <- GetSigMods(RefData = RefData, ClassLabels = ClassLabels, refmod = refObj)
-  refObj <- GetSigMods2(RefData = RefData, ClassLabels = ClassLabels, refmod = refObj)
+  refObj <- GetSigMods(RefData = RefData, ClassLabels = ClassLabels, refMod = refObj, ...)
+  #Determine the alphas
+  refObj@alphas <- DetermineAlphas(refMod = refObj, RefData = RefData, Prior = ClassLabels, ...)
+
+  cat("Successfull!\n")
   #foreach::registerDoSEQ()
   return(refObj)
 }
 
-DetermineAlpha <- function(refmod, RefData, Prior){
-  refmod@alpha[[1]] <- 0
-  Hierobj <- HieRFIT(Query = RefData, refMod = refmod, Prior = Prior)
-  fails <- Hierobj@Evaluation$Projection != Hierobj@Prior
-  alpha <- mean(Hierobj@Evaluation[fails,]$Certainty)
-  if(is.na(alpha)){alpha<-0}
-  return(alpha)
-}
+#' A function to determine alpha thresholds of each class in the tree.
+#' @param refMod reference model. This will be used for self-projection.
+#' @param RefData Reference data from which class labels will be projected on Query data (in this case self-projection).
+#' @param Prior prior class labels if exist. For cross comparison. Should correspond row order of the Query.
+DetermineAlphas <- function(refMod, RefData, Prior, ...){
+  cat("Now, determining the alpha tresholds...\n")
+  Caldata <- NoiseInjecter(RefData = RefData,
+                           ClassLabels = Prior,
+                           refMod = refMod, ...)
 
-DetermineAlpha3 <- function(refmod, RefData, Prior){
-  tree <- refmod@tree[[1]]
-  labs_l <- c(tree$tip.label, tree$node.label)
-  labs_l <- labs_l[!labs_l %in% "TaxaRoot"]
+  rownames(Caldata$data) <- FixLab(xstring = rownames(Caldata$data))
+  #Fix this step when cross-species is the case
+  HieMetObj <- CTTraverser(Query = Caldata$data, refMod = refMod)
+  df <- ScoreEvaluate(ProbCert = HieMetObj@QueCers,
+                      tree = refMod@tree[[1]],
+                      full.tbl = TRUE)
 
-  alpha.list.def <- list()
-  for(node.lab in labs_l){
-    AncPath <- GetAncestPath(tree = tree, class = node.lab, labels = T)
-    alp <- rep(0, length(AncPath))
-    names(alp) <- AncPath
-    alpha.list.def[[node.lab]] <- alp
-  }
-
-  refmod@alpha[[1]] <- alpha.list.def
-
-  Hierobj <- HieRFIT(Query = RefData, refMod = refmod, Prior = Prior)
-
-  succs <- Hierobj@Evaluation$Projection == Hierobj@Prior
-  succsLabs <- as.character(Hierobj@Evaluation[succs,]$Projection)
-  succsCerst <- Hierobj@CertaintyValues[succs,]
-
-  fails <- Hierobj@Evaluation$Projection != Hierobj@Prior
-  failsLabs <- as.character(Hierobj@Evaluation[fails,]$Projection)
-  failsCerst <- Hierobj@CertaintyValues[fails,]
-
+  labs_l <- c(refMod@tree[[1]]$tip.label, refMod@tree[[1]]$node.label)
   alpha.list <- list()
-  for(node.lab in labs_l[labs_l %in% failsLabs]){
-    AncPath <- GetAncestPath(tree = tree, class = node.lab, labels = T)
-    al.list <- NULL
-    for(i in 1:length(AncPath)){
-      if(any(failsLabs == node.lab)){
-        maxcer <- mean(failsCerst[failsLabs == node.lab, AncPath[i]])
-      }else{
-        maxcer <- 0
-      }
-      al.list <- append(al.list, maxcer)
+  for(class in labs_l[!labs_l %in% "TaxaRoot"]){
+    if(!class %in% refMod@tree[[1]]$tip.label){
+      Node <- match(class, labs_l)
+      leaf <- GetChildNodeLeafs(tree = refMod@tree[[1]], node = Node)
+      leaf <- unlist(leaf[which(lapply(leaf, length)>0)])
+    }else{
+      leaf <- class
     }
-    names(al.list) <- AncPath
-    alpha.list[[node.lab]] <- al.list
-  }
+    #cer.mean <- mean(df[which(Caldata$Y %in% leaf), class])
+    #cer.sd <- sd(df[which(Caldata$Y %in% leaf), class])
+    #cer.min <- min(df[which(Caldata$Y %in% leaf), class])
+    cer.max <- max(df[which(Caldata$Y %in% leaf), class])
 
-  for(node.lab in labs_l[!labs_l %in% failsLabs]){
-    AncPath <- GetAncestPath(tree = tree, class = node.lab, labels = T)
-    al.list <- NULL
-    for(n in 1:length(AncPath)){
-      list.n <- NULL
-      for(i in 1:length(alpha.list)){
-        if(AncPath[n] %in% names(alpha.list[[i]])){
-          n.cer <- alpha.list[[i]][AncPath[n]]
-        }else{
-          n.cer <- 0
-          names(n.cer) <- AncPath[n]
-        }
-        list.n <- append(list.n, n.cer)
+    data <- df[which(Caldata$Y %in% leaf), class]
+    #data
+    #lowerq = quantile(data)[2]
+    #upperq = quantile(data)[4]
+    #iqr = upperq - lowerq #inter quartile range
+
+    #extreme.threshold.upper = (iqr * 3) + upperq
+    #extreme.threshold.lower = lowerq - (iqr * 3)
+
+    #data <- df[which(Caldata$Y %in% leaf), class]
+    #lowerq = quantile(data)[2]
+    #upperq = quantile(data)[4]
+
+    data.not <- df[which(!Caldata$Y %in% leaf), class]
+    #lowerq.not = quantile(data.not)[2]
+    #upperq.not = quantile(data.not)[4]
+
+    #iqr = upperq - lowerq #inter quartile range
+
+    #extreme.threshold.upper = (iqr * 3) + upperq
+    #extreme.threshold.lower = lowerq - (iqr * 3)
+
+    df_10 <- rbind(data.frame(Class="1", Cert=data), data.frame(Class="0", Cert=data.not))
+    df_10 <- df_10[order(df_10$Cert), ]
+
+    C1 <- 0; C0 <- 0; Diff <- c()
+    for(i in 1:length(df_10[,1]) ){
+      if(df_10[i,]$Class == 1){
+        C1 <- C1 +1
+      }else{
+        C0 <- C0 +1
       }
-      list.n <- mean(list.n, na.rm = T)
-      al.list <- append(al.list, list.n)
+      Diff <- c(Diff, abs(C1 - C0))
     }
-    names(al.list) <- AncPath
-    alpha.list[[node.lab]] <- al.list
-  }
+    df2 <- cbind(df_10, Diff=Diff)
+
+    SmartCutoff <- as.numeric(head(df2[order(df2$Diff, decreasing = T),],1)['Cert'])
+
+    #alpha.list[[class]]['Up.ext'] <- extreme.threshold.upper
+    #alpha.list[[class]]['Low.ext'] <- extreme.threshold.lower
+    alpha.list[[class]]['Low.ext'] <- SmartCutoff
+    alpha.list[[class]]['Up.ext'] <- cer.max
+    #alpha.list[[class]]['Low.ext'] <- cer.min
+    }
 
   return(alpha.list)
 }
@@ -138,17 +161,21 @@ CreateTree <- function(treeTable){
   #Create a tree:
   library(ape)#TRY REPLACING
   library(data.tree)# '::' doesn't work!
-
+  cat("Creating a tree with user table input...\n")
   treeTable <- data.frame(lapply(treeTable, function(x) {gsub("\\+|-|/", ".", x)}))
 
   treeTable$pathString <- apply(cbind("TaxaRoot", treeTable), 1, paste0, collapse="/")
   tree <- as.phylo(as.Node(treeTable))
+  cat("Done!\n")
+
   return(tree)
 }
+
 #' A function to create a tree from the reference data based on euclidean distances between class types.
-#' @param RefData
-#' @param ClassLabels
+#' @param RefData Reference data from which class labels will be projected on Query data.
+#' @param ClassLabels A list of class labels for cells/samples in the Data matrix (Ref). Same length as colnames(Ref).
 CreateDeNovoTree <- function(RefData, ClassLabels){
+  cat("Creating a de novo tree...\n")
   refData_mean <- NULL
   for(ct in unique(ClassLabels)){
     dt <- RefData[, ClassLabels == ct]
@@ -161,6 +188,7 @@ CreateDeNovoTree <- function(RefData, ClassLabels){
   clusts <- hclust(cl_dists)
   tree <- ape::as.phylo(clusts)
   tree$node.label <- c("TaxaRoot", paste("Int.Node", seq(tree$Nnode-1), sep = "."))
+  cat("Done!\n")
   return(tree)
 }
 
@@ -172,27 +200,11 @@ CreateDeNovoTree <- function(RefData, ClassLabels){
 #' @keywords
 #' @export
 #' @usage
-HieRandForest <- function(RefData, ClassLabels, tree, thread=3, RPATH=NULL, ...){
+HieRandForest <- function(RefData, ClassLabels, tree, thread, RPATH=NULL, ...){
 
   node.list <- DigestTree(tree = tree)
   hiemods <- vector("list", length = max(node.list))
-  # var_cutoff=0.05
 
-  #Rdata <- RefData[which(apply(RefData, 1, var) > var_cutoff),]
-  # tabl <- table(ClassLabels)
-  #
-  # Pool <- NULL
-  # for(cc in names(tabl)){
-  #   print(cc)
-  #   #SampSize.min instead of tabl[cc]
-  #   nonzeroFeatures <- rownames(RefData)[rowSums(RefData[, ClassLabels == cc] != 0)/tabl[cc] > var_cutoff]
-  #   Pool <- append(Pool, nonzeroFeatures)
-  # }
-  # Pool <- unique(sort(Pool))
-  #
-  # Rdata <- RefData[which(rownames(RefData) %in% Pool),]
-
-  # Rdata <- as.data.frame(t(Rdata))
   Rdata <- as.data.frame(t(RefData))
   colnames(Rdata) <- FixLab(xstring = colnames(Rdata))
   Rdata$ClassLabels <- factor(make.names(ClassLabels))
@@ -202,129 +214,45 @@ HieRandForest <- function(RefData, ClassLabels, tree, thread=3, RPATH=NULL, ...)
   if(is.null(thread)){
     #Build a local classifier for each node in the tree. Binary or multi-class mixed.
     for(i in node.list){
-
-      print(paste("Training local node", tree$node.label[i-length(tree$tip.label)], sep=" "))
+      cat("\n")
+      #print(paste("Training local node", tree$node.label[i - length(tree$tip.label)], sep=" "))
+      #cat(paste("Training local node", tree$node.label[i - length(tree$tip.label)], sep=" "))
       setTxtProgressBar(pb, p)
-
-      #hiemods[[i]] <- NodeTrainer(Rdata = Rdata, tree = tree, node = i, ...)
-      hiemods[[i]] <- NodeTrainer3(Rdata = Rdata, tree = tree, node = i, ...)
-      #hiemods[[i]] <- NodeTrainer4(Rdata = Rdata, tree = tree, node = i, ...)
-      #hiemods[[i]] <- NodeTrainer5(Rdata = Rdata, tree = tree, node = i, ...)
+      hiemods[[i]] <- NodeTrainer(Rdata = Rdata, tree = tree, node = i, ...)
       p=p+1
     } #closes the for loop.
+    cat("\nDone!\n")
 
   }else{# thread is specified. For now, use this only when running on bigMem machines.
     library(doParallel)
     cl <- makePSOCKcluster(thread)
     registerDoParallel(cl)
-    #clusterEvalQ(cl, .libPaths("/n/home13/yasinkaymaz/miniconda3/envs/R3.6/lib/R/library"))
     print(paste("registered cores is", getDoParWorkers(), sep = " "))
     out <- foreach(i=node.list, .packages = c('caret'), .inorder = TRUE, .export = ls(.GlobalEnv)) %dopar% {
-      NodeTrainer3(Rdata = Rdata, tree = tree, node = i, ...)
+      NodeTrainer(Rdata = Rdata, tree = tree, node = i, ...)
     }
     stopCluster(cl)
-    # default <- registered()
-    # register(BatchtoolsParam(workers = thread), default = TRUE)
-    #
-    # out <- bplapply(node.list, function(i) {NodeTrainer2(Rdata = Rdata, tree = tree, node = i, ...)} )
-    #
-    # for (param in rev(default))
-    #   register(param)
 
     for(x in 1:length(out)){
       hiemods[node.list[x]] <- out[x]
     }
   }
-  #FlatTreeTable <- data.frame(V1=names(table(ClassLabels)))
-  #tree <- CreateTree(treeTable = FlatTreeTable)
-  #fi <- DigestTree(tree = tree)
-  #i is the last node in the node.list above:
-  #hiemods[[i+1]] <- NodeTrainer(Rdata = Rdata, tree = tree, node = fi)
+
   names(hiemods) <- seq_along(hiemods)
   hiemods[sapply(hiemods, is.null)] <- NULL
 
   return(hiemods)
 }
 
-#' A function to create a local classifier for a given node.
-#' @param Rdata
-#' @param tree
-#' @param node
-#' @param f_n number of features to be included in local classifier.
-NodeTrainer <- function(Rdata, tree, node, f_n=200, tree_n=500, ...){
-
-  node.Data <- SubsetTData2(Tdata = Rdata, tree = tree, node = node)
-  node.ClassLabels <- node.Data$ClassLabels
-  node.Data <- droplevels(subset(node.Data, select=-c(ClassLabels)))
-  node.Data <- node.Data[, apply(node.Data, 2, var) != 0]
-  #First select the highly variable genes that correlate with the PCs
-  P_dict <- FeatureSelector(Data = node.Data,
-                             ClassLabels = node.ClassLabels,
-                             num = 2000,
-                             ...)
-  node.Data <- droplevels(subset(node.Data, select=c(P_dict)))
-  #Then, select the genes as predictors if statistically DE between the classes.
-  P_dict <- FeatureSelector2(Data = node.Data,
-                            ClassLabels = node.ClassLabels,
-                            num = f_n,
-                            ...)
-  node.Data <- droplevels(subset(node.Data, select=c(P_dict)))
-  node.Data$ClassLabels <- node.ClassLabels
-
-  #Generate outgroup data for the node:
-  #1. check the node: is.internal? is.not.Root?
-  labs_l <- c(tree$tip.label, tree$node.label)
-
-  if(labs_l[node] != "TaxaRoot"){
-  parent.t <- tree$edge[which(x = tree$edge[, 2] == node), ][1]
-  for(n in 1:length(labs_l)){
-    if(labs_l[n] != "TaxaRoot"){
-      parent.p <- tree$edge[which(x = tree$edge[, 2] == n), ][1]
-      if(parent.t == parent.p & node != n){
-        print(paste("Training for", labs_l[node], "and its sibling is:", labs_l[n]))
-        #SubsetTData
-        node.outData <- SubsetTData2(Tdata = Rdata, tree = tree, node = n)
-        node.outData <- droplevels(subset(node.outData, select=c(P_dict)))
-        node.outData$ClassLabels <- paste(labs_l[node], "OutGroup", sep="_")
-        if(dim(node.outData)[1] > 500){
-          node.outData <- node.outData[sample(rownames(node.outData), size = 500), ]
-        }
-        node.Data <- rbind(node.Data, node.outData)
-       }
-     }
-   }
-  }
-  #--#
-  train.control <- caret::trainControl(method="oob",
-                                       returnData = FALSE,
-                                       savePredictions = "none",
-                                       returnResamp = "none",
-                                       allowParallel = TRUE,
-                                       classProbs =  TRUE,
-                                       trim = TRUE)
-  node.mod <- caret::train(ClassLabels~.,
-                           data = node.Data,
-                           method = "rf",
-                           norm.votes = TRUE,
-                           importance = FALSE,
-                           proximity = FALSE,
-                           outscale = FALSE,
-                           preProcess = c("center", "scale"),
-                           ntree = tree_n,
-                           trControl = train.control, ...)
-
-  return(node.mod)
-}
-
-NodeTrainer3 <- function(Rdata, tree, node, f_n=200, tree_n=500, switchBox='off', ...){
+#' A function to train local nodes.
+#' @param Rdata the transposed data for the node.
+#' @param tree the tree input.
+#' @param f_n the total number of features to be selected.
+#' @param tree_n the total number of tree in each random forest.
+#' @param min_n the cealing threshold for each class sample when training.
+NodeTrainer <- function(Rdata, tree, node, f_n=200, tree_n=500, min_n = 500, ...){
 
   node.Data <- SubsetTData(Tdata = Rdata, tree = tree, node = node)
-  #node.ClassLabels <- node.Data$ClassLabels
-  #node.Data <- droplevels(subset(node.Data, select=-c(ClassLabels)))
-  #node.Data <- node.Data[, apply(node.Data, 2, var) != 0]
-
-  #node.Data$ClassLabels <- node.ClassLabels
-
   #Generate outgroup data for the node:
   #1. check the node: is.not.Root?
   labs_l <- c(tree$tip.label, tree$node.label)
@@ -336,13 +264,14 @@ NodeTrainer3 <- function(Rdata, tree, node, f_n=200, tree_n=500, switchBox='off'
     }
     outGroupLeafs <- tree$tip.label[!tree$tip.label %in% childLeafs]
     node.outData <- droplevels(Rdata[which(Rdata$ClassLabels %in% outGroupLeafs), ])
-    if(dim(node.outData)[1] > 500){
-      node.outData <- node.outData[sample(rownames(node.outData), size = 500), ]#500 can be replaced with a better #
+    if(dim(node.outData)[1] > min_n){
+      node.outData <- node.outData[sample(rownames(node.outData), size = min_n), ]
     }
     node.outData <- droplevels(subset(node.outData, select=c(colnames(node.Data))))
   }else{
     #Create OurGroup for the TaxaRoot
-    node.outData <- droplevels(Rdata[sample(rownames(Rdata), size = 500), ])
+    if(dim(Rdata)[1] > min_n){s_n <- min_n}else{s_n <- dim(Rdata)[1]}
+    node.outData <- droplevels(Rdata[sample(rownames(Rdata), size = s_n), ])
     node.outData <- droplevels(subset(node.outData, select=c(colnames(node.Data))))
     node.outData <- droplevels(subset(node.outData, select=-c(ClassLabels)))
     node.outData <- Shuffler(df = node.outData)
@@ -353,34 +282,37 @@ NodeTrainer3 <- function(Rdata, tree, node, f_n=200, tree_n=500, switchBox='off'
   node.ClassLabels <- node.Data$ClassLabels
   node.Data <- droplevels(subset(node.Data, select=-c(ClassLabels)))
 
+  #Downsize samples:
+  include_idx <- NULL
+  classes <- table(node.ClassLabels)
+
+  for(type in names(classes)){
+    type_idx <- which(node.ClassLabels == type)
+    if(length(type_idx) > min_n){
+      include_idx <- c(include_idx, sample(type_idx, min_n, replace = F))
+    }else{
+      include_idx <- c(include_idx, type_idx)
+    }
+  }
+  node.ClassLabels <- node.ClassLabels[include_idx]
+  node.Data <- node.Data[include_idx, ]
+
   node.Data <- node.Data[, apply(node.Data, 2, var) != 0]
-#$$$
-  #Select top highly varible genes:
-  vmr <- Seurat::FindVariableFeatures(t(expm1(node.Data)),verbose=F)
-  vmr <- vmr[order(vmr$vst.variance.standardized, decreasing = T),]
-  P_dict <- head(rownames(vmr), 4000)
 
+
+  #First select the highly variable genes that correlate with the PCs
+  P_dict <- FeaSelectPCA(Data = node.Data,
+                         ClassLabels = node.ClassLabels,
+                         num = 2000,
+                         ...)
   node.Data <- droplevels(subset(node.Data, select=c(P_dict)))
-#$$$
-    #First select the highly variable genes that correlate with the PCs
-    P_dict <- FeatureSelector(Data = node.Data,
-                              ClassLabels = node.ClassLabels,
-                              num = 2000,
-                              ...)
-    node.Data <- droplevels(subset(node.Data, select=c(P_dict)))
-    #Then, select the genes as predictors if statistically DE between the classes.
-    P_dict <- FeatureSelector2(Data = node.Data,
-                               ClassLabels = node.ClassLabels,
-                               num = f_n,
-                               ...)
+  #Then, select the genes as predictors if statistically DE between the classes.
+  P_dict <- FeaSelectWilcox(Data = node.Data,
+                            ClassLabels = node.ClassLabels,
+                            num = f_n,
+                            ...)
+  node.Data <- droplevels(subset(node.Data, select=c(P_dict)))
 
-    #pool <- PairsPool(P_dict = P_dict, node.Data = node.Data, node.ClassLabels = node.ClassLabels)
-
-    node.Data <- droplevels(subset(node.Data, select=c(P_dict)))
-    #node.Data <- droplevels(subset(node.Data, select=c(pool)))
-
-  #node.Data$ClassLabels <- node.ClassLabels
-  #--#
   train.control <- caret::trainControl(method="oob",
                                        returnData = FALSE,
                                        savePredictions = "none",
@@ -388,16 +320,6 @@ NodeTrainer3 <- function(Rdata, tree, node, f_n=200, tree_n=500, switchBox='off'
                                        allowParallel = TRUE,
                                        classProbs =  TRUE,
                                        trim = TRUE)
-  # node.mod <- caret::train(ClassLabels~.,
-  #                          data = node.Data,
-  #                          method = "rf",
-  #                          norm.votes = TRUE,
-  #                          importance = TRUE,
-  #                          proximity = FALSE,
-  #                          outscale = FALSE,
-  #                          preProcess = c("center", "scale"),
-  #                          ntree = tree_n,
-  #                          trControl = train.control, ...)
   node.mod <- caret::train(x = node.Data,
                            y = node.ClassLabels,
                            method = "rf",
@@ -409,196 +331,7 @@ NodeTrainer3 <- function(Rdata, tree, node, f_n=200, tree_n=500, switchBox='off'
                            ntree = tree_n,
                            trControl = train.control, ...)
 
-
   return(node.mod)
-}
-
-NodeTrainer4 <- function(Rdata, tree, node, f_n=200, tree_n=500, PC_n=40, ...){
-
-  node.Data <- SubsetTData(Tdata = Rdata, tree = tree, node = node)
-  node.ClassLabels <- node.Data$ClassLabels
-  node.Data <- droplevels(subset(node.Data, select=-c(ClassLabels)))
-  #node.Data <- node.Data[, apply(node.Data, 2, var) != 0]
-
-  node.Data$ClassLabels <- node.ClassLabels
-
-  #Generate outgroup data for the node:
-  #1. check the node: is.not.Root?
-  labs_l <- c(tree$tip.label, tree$node.label)
-  if(labs_l[node] != "TaxaRoot"){
-    childNodes <- GetChildNodeLeafs(tree = tree, node = node)
-    childLeafs <- NULL
-    for (i in which(lapply(childNodes, length) > 0)){
-      childLeafs <- c(childLeafs, childNodes[i][[1]])
-    }
-    outGroupLeafs <- tree$tip.label[!tree$tip.label %in% childLeafs]
-    SampSize.min <- min(table(Rdata$ClassLabels)[outGroupLeafs])
-    for(x in outGroupLeafs){
-      node.outData <- droplevels(Rdata[which(Rdata$ClassLabels == x), ])
-      node.outData <- node.outData[sample(rownames(node.outData), size = SampSize.min), ]
-      node.outData <- droplevels(subset(node.outData, select=c(colnames(node.Data))))
-      node.outData$ClassLabels <- paste(labs_l[node], "OutGroup", sep="_")
-      node.Data <- rbind(node.Data, node.outData)
-    }
-  }else{
-    RandN <- median(table(node.ClassLabels))
-    node.outData <- droplevels(Rdata[sample(rownames(Rdata), size=RandN), ])
-    node.outData <- droplevels(subset(node.outData, select=c(colnames(node.Data))))
-    node.ClassLabels <- node.Data$ClassLabels
-    node.outData <- droplevels(subset(node.outData, select=-c(ClassLabels)))
-    node.outData <- Shuffler(df = node.outData)
-    node.outData$ClassLabels <- paste(labs_l[node], "OutGroup", sep="_")
-    node.Data <- rbind(node.Data, node.outData)
-  }
-
-  node.ClassLabels <- node.Data$ClassLabels
-  node.Data <- droplevels(subset(node.Data, select=-c(ClassLabels)))
-
-  #Here transform the node.Data into PC space:
-  #node.Data <- node.Data[, apply(node.Data, 2, var) != 0]
-
-  #Select top highly varible genes:
-  vmr <- Seurat::FindVariableFeatures(t(expm1(node.Data)),verbose=F)
-  vmr <- vmr[order(vmr$vst.variance.standardized, decreasing = T),]
-  node.Data <- node.Data[, head(rownames(vmr), 2000)]
-
-  pcatrain <- prcomp(node.Data, center = TRUE, scale=TRUE, rank. = PC_n)
-  PCs.sig <- selectSigPCs(pcatrain, node.ClassLabels)
-
-  #--#
-  train.control <- caret::trainControl(method="oob",
-                                       returnData = FALSE,
-                                       savePredictions = "none",
-                                       returnResamp = "none",
-                                       allowParallel = TRUE,
-                                       classProbs =  TRUE,
-                                       trim = TRUE)
-
-  node.mod <- caret::train(x = pcatrain$x[,PCs.sig],
-                           y = node.ClassLabels,
-                           method = "rf",
-                           norm.votes = TRUE,
-                           importance = TRUE,
-                           proximity = FALSE,
-                           outscale = FALSE,
-                           #preProcess = c("center", "scale"),
-                           ntree = tree_n,
-                           trControl = train.control, ...)
-
-  node.mod[["trainPCA"]] <- pcatrain
-  return(node.mod)
-}
-
-NodeTrainer5 <- function(Rdata, tree, node, f_n=200, tree_n=500, ...){
-
-  node.Data <- SubsetTData(Tdata = Rdata, tree = tree, node = node)
-  node.ClassLabels <- node.Data$ClassLabels
-  node.Data <- droplevels(subset(node.Data, select=-c(ClassLabels)))
-  #node.Data <- node.Data[, apply(node.Data, 2, var) != 0]
-
-  node.Data$ClassLabels <- node.ClassLabels
-
-  #Generate outgroup data for the node:
-  #1. check the node: is.not.Root?
-  labs_l <- c(tree$tip.label, tree$node.label)
-  if(labs_l[node] != "TaxaRoot"){
-    childNodes <- GetChildNodeLeafs(tree = tree, node = node)
-    childLeafs <- NULL
-    for (i in which(lapply(childNodes, length) > 0)){
-      childLeafs <- c(childLeafs, childNodes[i][[1]])
-    }
-    outGroupLeafs <- tree$tip.label[!tree$tip.label %in% childLeafs]
-    SampSize.min <- min(table(Rdata$ClassLabels)[outGroupLeafs])
-    for(x in outGroupLeafs){
-      print(x)
-      node.outData <- droplevels(Rdata[which(Rdata$ClassLabels == x), ])
-      node.outData <- node.outData[sample(rownames(node.outData), size = SampSize.min), ]
-      node.outData <- droplevels(subset(node.outData, select=c(colnames(node.Data))))
-      node.outData$ClassLabels <- paste(labs_l[node], "OutGroup", sep="_")
-      node.Data <- rbind(node.Data, node.outData)
-    }
-  }
-
-
-  node.ClassLabels <- node.Data$ClassLabels
-  node.Data <- droplevels(subset(node.Data, select=-c(ClassLabels)))
-
-  # Pool <- NULL
-  # for(cc in names(tabl)){
-  #   #SampSize.min instead of tabl[cc]
-  #   nonzeroFeatures <- names(node.Data)[colSums(node.Data[node.ClassLabels == cc, ] != 0)/SampSize.min > .5]
-  #   Pool <- append(Pool, nonzeroFeatures)
-  # }
-  # Pool <- unique(sort(Pool))
-  #
-  # node.Data <- droplevels(subset(node.Data, select=c(Pool)))
-
-
-  #Select top highly varible genes:
-  vmr <- Seurat::FindVariableFeatures(t(expm1(node.Data)),verbose=F)
-  vmr <- vmr[order(vmr$vst.variance.standardized, decreasing = T),]
-  P_dict <- head(rownames(vmr), f_n)
-
-  node.Data <- droplevels(subset(node.Data, select=c(P_dict)))
-
-
-  #node.Data$ClassLabels <- node.ClassLabels
-  #--#
-  train.control <- caret::trainControl(method="oob",
-                                       returnData = FALSE,
-                                       savePredictions = "none",
-                                       returnResamp = "none",
-                                       allowParallel = TRUE,
-                                       classProbs =  TRUE,
-                                       trim = TRUE,
-                                       sampling = "down",
-                                       preProcOptions = list(thresh = 0.95,
-                                                             ICAcomp = 3,
-                                                             k = 5,
-                                                             freqCut = 95/5,
-                                                             uniqueCut = 10,
-                                                             cutoff = 0.9))
-
-  node.mod <- caret::train(x = node.Data,
-                           y = node.ClassLabels,
-                           method = "rf",
-                           norm.votes = TRUE,
-                           importance = TRUE,
-                           proximity = FALSE,
-                           outscale = FALSE,
-                           preProcess = c("center", "scale"),
-                           ntree = tree_n,
-                           trControl = train.control, ...)
-
-
-  return(node.mod)
-}
-
-selectSigPCs <- function(pcatrain, ClassLabels){
-  pcadata <- data.frame(pcatrain$x, ClassLabels = ClassLabels)
-  cls <- levels(ClassLabels)
-  PC_n <- length(pcatrain$x[1,])
-  ptab <- NULL
-  for(i in 1:PC_n){
-    PC.stats <- NULL
-    for(c in cls){
-      p.cl <- t.test(pcadata[pcadata$ClassLabels == c, i],
-                     pcadata[pcadata$ClassLabels != c, i])$p.value
-      PC.stats <- c(PC.stats, p.cl)
-    }
-    names(PC.stats) <- cls
-    pc.col <- paste("PC", i, sep = "")
-    ptab <- cbind(ptab, pc.col=PC.stats)
-  }
-
-  ptab <- as.data.frame(ptab)
-  colnames(ptab) <- colnames(pcadata)[-length(pcadata[1,])]
-  ptab <- ptab*length(cls)*PC_n#Correct for the multiple test. Bonferroni.
-  #Select only PCs which are significanly separating at least one of the class.
-  PCs.sig <- colnames(ptab[, apply(ptab < 0.05, 2 ,any)])
-
-  if(length(PCs.sig) == 0){PCs.sig <- paste(rep("PC", 3), 1:3, sep="")}
-  return(PCs.sig)
 }
 
 #' A function used internally for selecting genes based on their weight in the top principle components.
@@ -612,10 +345,7 @@ selectSigPCs <- function(pcatrain, ClassLabels){
 #' @param ... parameters to be passed down to subfunctions such as f_n, tree_n, and PC_n,
 #' for "number of features per local classifier", "number of trees per local classsifier",
 #' and "number of PC space for feature search", respectively.
-#' @keywords PCA loadings selection
-#' @export
-#' @usage Predictors <- FeatureSelector(Data = as.matrix(SeuratObject@data), PCs = 10, num = 2000)
-FeatureSelector <- function(Data, ClassLabels, PC_n = 40, num = 200, ...) {
+FeaSelectPCA <- function(Data, ClassLabels, PC_n=40, num=200, ...) {
   #do pca
   pcatrain <- prcomp(Data, center = TRUE, scale=TRUE, rank. = PC_n)
   pcadata <- data.frame(pcatrain$x, ClassLabels = ClassLabels)
@@ -659,8 +389,11 @@ FeatureSelector <- function(Data, ClassLabels, PC_n = 40, num = 200, ...) {
   return(pick.rot)
 }
 
-
-FeatureSelector2 <- function(Data, ClassLabels, num = 200, ...) {
+#' A function for applying Wilcox test for candidate features.
+#' @param Data an data matrix storing gene expression as genes in rows and samples in columns.
+#' @param ClassLabels A list of class labels for cells/samples in the Data matrix. Same length as colnames(Data).
+#' @param num the number of Predictors (genes) in total to be included. Default is 2000.
+FeaSelectWilcox <- function(Data, ClassLabels, num = 200, ...) {
   cls <- levels(ClassLabels)
   #Data.cl <- data.frame(Data, ClassLabels = ClassLabels)# If you do this way, it cannot find genes, gives error. Weird!
   Data.cl <- Data
@@ -691,53 +424,17 @@ FeatureSelector2 <- function(Data, ClassLabels, num = 200, ...) {
   for(c in names(ptab)){
     fea.p <- ptab[order(abs(ptab[, c]), decreasing = FALSE), ]
     #exclude already selected variables.
-    fea.p <- fea.p[!rownames(fea.p) %in% pick.fea,]
+    fea.p <- fea.p[!rownames(fea.p) %in% pick.fea, ]
     #select top N variables. N is proportional to each class.
     pick.fea <- c(pick.fea, rownames(head(fea.p, round(num/length(cls)))))
   }
   return(pick.fea)
 }
 
-#' @param
-#' @usage  genePairs <- FindPairs(P_dict, node.Data, node.ClassLabels)
-PairsPool <- function(P_dict, node.Data, node.ClassLabels, score_threshold=0.5){
-  library(tspair)
-  genes <- P_dict
-  df <- t(node.Data)
-
-  genePairs <- c()
-  pairs.pool <- c()
-
-  for(c in unique(as.character(node.ClassLabels))){
-    genes <- P_dict
-    df <- t(node.Data)
-    #create the gene pairs:
-    data <- df[P_dict, ]
-
-    node.labs <- as.character(node.ClassLabels)
-    node.labs[which(node.labs != c)] <- "A"
-    node.labs[which(node.labs == c)] <- "B"
-
-    while(length(genes) >= 2){
-      tsp1 <- tspcalc(as.matrix(data), node.labs)
-      pairs <- rownames(tsp1$tspdat)
-      if((!pairs[1] == pairs[2]) && (tsp1$tspscore > score_threshold)){
-        pairs.pool <- append(pairs.pool,pairs[1])
-        pairs.pool <- append(pairs.pool,pairs[2])
-      }
-      genes <- genes[!genes %in% pairs]
-      data <- data[genes,]
-    }
-  }
-  return(unique(pairs.pool))
-}
-
-
 #' A function to slide data according to the class hierarchies. And updates the class labels.
-#' @param Tdata
-#' @param tree
-#' @param node
-#' @param transpose
+#' @param Tdata transposed data.
+#' @param tree tree input.
+#' @param node a particular node of the tree.
 SubsetTData <- function(Tdata, tree, node){
   # 1. Extract the data under the node. Subsample if necessary.
   childNodes <- GetChildNodeLeafs(tree = tree, node = node)
@@ -764,38 +461,91 @@ SubsetTData <- function(Tdata, tree, node){
   return(SubTdata)
 }
 
-SubsetTData2 <- function(Tdata, tree, node){
-
-  labs_l <- c(tree$tip.label, tree$node.label)
-
-  if(labs_l[node] %in% tree$tip.label){
-    childNodes <- list(labs_l[node])
-    SubTdata <- droplevels(Tdata[which(Tdata$ClassLabels %in% childNodes[[1]]), ])
-
-  }else{
-
-  # 1. Extract the data under the node. Subsample if necessary.
-  childNodes <- GetChildNodeLeafs(tree = tree, node = node)
-  SubTdata <- NULL
-  #loop through child nodes that are not null in the list.
-  for (i in which(lapply(childNodes, length) > 0)){
-    Subdata <- droplevels(Tdata[which(Tdata$ClassLabels %in% childNodes[i][[1]]), ])
-    if (i > length(tree$tip.label)){# if the node is not a leaf node, then
-      if(!is.null(tree$node.label)){# if labels for subnodes exist
-        labels <- c(tree$tip.label, tree$node.label)
-        #Replace labels with subnode labels.
-        Subdata$ClassLabels <- as.factor(labels[i])
-      } else {
-        #if subnodes don't exist, replace class tip labels with childnode label.
-        Subdata$ClassLabels <- as.factor(i)
+#' A function for generating the sigmoid functions.
+#' @param RefData input reference data.
+#' @param ClassLabels input class labels.
+#' @param refMod reference model.
+GetSigMods <- function(RefData, ClassLabels, refMod, ...){
+  cat("Now calibrating the nodes...\n")
+  #Cal.data <- NoiseInject(RefData = RefData, ClassLabels = ClassLabels, refMod = refMod)
+  Cal.data <- NoiseInjecter(RefData = RefData, ClassLabels = ClassLabels, refMod = refMod)
+  Pvotes <- ProbTraverser(Query = Cal.data[["data"]], refMod = refMod, ...)
+  labs_l <- c(refMod@tree[[1]]$tip.label, refMod@tree[[1]]$node.label)
+  votes <- data.frame(Prior=Cal.data[["Y"]], Pvotes)
+  node.list <- DigestTree(tree = refMod@tree[[1]])
+  for(i in node.list){
+    nodeModel <- refMod@model[[as.character(i)]]
+    outGname <- grep("OutGroup", nodeModel$finalModel$classes, value=T)
+    Leafs <- NULL
+    classes <- nodeModel$finalModel$classes[! nodeModel$finalModel$classes %in% outGname]
+    node.dict <- list()
+    Labs <- votes$Prior
+    for(l in classes){
+      if(l %in% refMod@tree[[1]]$tip.label){
+        node.dict[[l]] <- l
+      }else{
+        leaf <- GetChildNodeLeafs(tree = refMod@tree[[1]], node = match(l, labs_l))
+        leaf <- leaf[which(lapply(leaf, length)>0)]
+        for(j in 1:length(leaf)){
+          Leafs <- append(Leafs, leaf[[j]])
+        }
+        node.dict[[l]] <- Leafs
+        Leafs <- NULL
       }
-    } else {#if the node is a terminal leaf
-      #Replace class tip labels with Leaf labels.
-      Subdata$ClassLabels <- as.factor(childNodes[i][[1]])
+      Labs <- ifelse(Labs %in% node.dict[[l]], l, as.character(Labs))
     }
-    #Combine with all other child node data
-    SubTdata <- rbind(SubTdata, Subdata)
+    Labs <- ifelse(!Labs %in% c(names(node.dict), node.dict), outGname, as.character(Labs))
+    dfr.full <- data.frame(Prior=Labs, votes[, nodeModel$finalModel$classes])
+    mlrmod <- nnet::multinom(Prior ~ ., data = dfr.full, model=FALSE, trace=FALSE)
+    #refMod@model[[as.character(i)]]$mlr <- stripGlmModel(mlrmod)
+    #refMod@model[[as.character(i)]]$mlr <- mlrmod
+    #refMod@mlr[[as.character(i)]] <- stripGlmModel(mlrmod)
+    refMod@mlr[[as.character(i)]] <- mlrmod
   }
- }
-  return(SubTdata)
+  cat("Done!\n")
+  return(refMod)
+}
+
+
+#' A function for generating the sigmoid functions.
+#' @param RefData input reference data.
+#' @param ClassLabels input class labels.
+#' @param NoiseRate the rate at which selected features are noised by setting their values to zero.
+#' @param refMod reference model to inject noise to only selected features. If Null, the entire data is used to inject noise.
+NoiseInjecter <- function(RefData, ClassLabels, NoiseRate=0.5, refMod=NULL, ...){
+  NoisedRefData <- list()
+
+  features <- NULL
+  if(is.null(refMod)){
+    features <- rownames(RefData)
+  }else{
+    for(i in names(refMod@model)){ features <- append(features, refMod@model[[i]]$finalModel$xNames)}
+  }
+  features <- unique(features)
+  RefData <- RefData[features, ]
+
+  #by default, rate is 10%
+  #Indices of non-zero counts:
+  NonZeroInds <- which(RefData!=0, arr.ind = T)
+  #Total number of non-zeros
+  nZ_c <- dim(NonZeroInds)[1]
+  #Indices of values in the count matrix to be set zero
+  noise_idx <- NonZeroInds[sample(1:nZ_c, nZ_c*NoiseRate),]
+  #set the selected counts to zero
+  X <- RefData
+  X[noise_idx] <- 0
+  #extract the noised samples
+  X <- X[, unique(noise_idx[, 'col'])]
+  Y <- ClassLabels[unique(noise_idx[, 'col'])]
+  #Create the taxaout data
+  min_n <- 500
+  if(dim(RefData)[2] > min_n){s_n <- min_n}else{s_n <- dim(RefData)[2]}
+  taxa.outData <- RefData[, sample(colnames(RefData), size = s_n)]
+  taxa.outData <- Shuffler(df = taxa.outData)
+  #combine them all
+  NoisedRefData[["data"]] <- cbind(RefData, X, taxa.outData)
+  NoisedRefData[["Y"]] <- c(ClassLabels, Y, rep("TaxaRoot_OutGroup", s_n))
+  colnames(NoisedRefData[["data"]]) <- make.names(colnames(NoisedRefData[["data"]]), unique = TRUE)
+
+  return(NoisedRefData)
 }

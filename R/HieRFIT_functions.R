@@ -1,76 +1,80 @@
 #HieRFIT functions:
 
 #' The HieRFIT Class
-#' @slot Prior
-#' @slot ClassProbs
-#' @slot ClassWeights
-#' @slot CertaintyValues
-#' @slot ClassScores
-#' @slot Evaluation
+#' @slot Prior a list of prior class labels if provided by the user.
+#' @slot ClassProbs raw class probabilities from each local classifier.
+#' @slot ClassWeights probability centers when the null is true for each class.
+#' @slot CertaintyValues certainty scores calculated by certainty function.
+#' @slot Evaluation table of scores and class projections for each sample.
+#' @slot tree classification tree copied from the hiermod.
 HieRFIT <- setClass(Class = "HieRFIT",
                     slots = c(Prior = "character",
                               ClassProbs = "data.frame",
                               ClassWeights = "data.frame",
                               CertaintyValues = "data.frame",
-                              ClassScores = "data.frame",
-                              Evaluation = "data.frame"))
+                              Evaluation = "data.frame",
+                              tree = "list"))
 
 #' HieMetrics class
-#' @slot Pvotes
-#' @slot QueWs
-#' @slot QueCers
-#' @slot Scores
+#' @slot Pvotes raw class probabilities from each local classifier.
+#' @slot QueWs probability centers when the null is true for each class.
+#' @slot QueCers certainty scores calculated by certainty function.
 HieMetrics <- setClass(Class = "HieMetrics",
                        slots = c(Pvotes = "data.frame",
                                  QueWs = "data.frame",
-                                 QueCers = "data.frame",
-                                 Scores = "data.frame")
-)
+                                 QueCers = "data.frame"))
 
 #' The main function to project reference data on query in order to identify class labels.
 #' @param Query Query data whose components will be labeled with reference data.
 #' @param refMod optional input if model exist already. Default is null and generated from scratch. Input can be an caret model object or a .Rdata file.
 #' @param Prior prior class labels if exist. For cross comparison. Should correspond row order of the Query.
-#' @param xSpecies optional argument to specify cross species information transfer. Default is null. Possible options are 'rat2mouse', 'mouse2rat', 'mouse2human', human2mouse. With respect to model data.
+#' @param Qspecies optional argument to specify cross species information transfer. Default is null. Possible options are 'rat2mouse', 'mouse2rat', 'mouse2human', human2mouse. With respect to model data.
 #' @param ortoDict optional argument to specify an existing orthology gene table for inter-species projection. Can be used to avoid re-running Biomart query which takes time.
 #' @keywords
 #' @export
-#' @usage expRefObj <- get(load("data/exp_refObj.Rdata"))
-#' @usage cpo <- HieRFIT(Query = as.matrix(pbmc1@data), refMod = expRefobj)
-HieRFIT <- function(Query, refMod, Prior=NULL, xSpecies=NULL, ortoDict=NULL){
-
+#' @usage refmod <- readRDS("data/exp_refObj.RDS")
+#' @usage hierObj <- HieRFIT(Query = pbmc[["RNA"]]@data, refMod = refmod)
+HieRFIT <- function(Query, refMod, Prior=NULL, Qspecies=NULL, ortoDict=NULL, binarize=FALSE, ...){
+  options(warn=-1)
   if ( class(Query) == "Seurat" ){
-    Query_d <- as.matrix(Query[["RNA"]]@data)}else{Query_d <- Query}#Change this to @counts and log1p after normalization
+    Query_d <- as.matrix(Query[["RNA"]]@data)
+    }else{
+      Query_d <- as.matrix(Query)
+      }
 
+  cat("Preparing the query data...\n")
   rownames(Query_d) <- FixLab(xstring = rownames(Query_d))
 
-  if( !is.null(xSpecies)) {
-    if(xSpecies == "mouse2rat"){ ## pay attention! flipped logic.
-      if(is.null(ortoDict)){
-        print("Rat to mouse gene id conversion...")
-        ortoDict <- Gmor(RatGenes = rownames(Query_d))
-        assign("ortoDict", ortoDict, .GlobalEnv)
-      }
-      ortoDict$external_gene_name <- FixLab(ortoDict$external_gene_name)
-      ortoDict$mmusculus_homolog_associated_gene_name <- FixLab(ortoDict$mmusculus_homolog_associated_gene_name)
-      Query_d <- Query_d[which(rownames(Query_d) %in% ortoDict$external_gene_name), ]
-      rownames(Query_d) <- ortoDict[match(rownames(Query_d), ortoDict$external_gene_name),]$mmusculus_homolog_associated_gene_name
-    }
-  }
-  if(refMod@modtype == "hrf"){
-    #HieMetObj <- CTTraverser(Query = Query_d, tree = refMod@tree[[1]], hiemods = refMod@model)
-    #HieMetObj <- CTTraverser4(Query = Query_d, tree = refMod@tree[[1]], hiemods = refMod@model)
-    HieMetObj <- CTTraverser.cal(Query = Query_d, tree = refMod@tree[[1]], refmod = refMod)
+  Query_d <- Query_d[apply(Query_d, 1, var) != 0, ]
 
-  }else{#FIX THIS
-    P_path_prod <- Predictor(model = refMod@model[[1]], Query = Query_d)
+  if(binarize){
+    Query_d <- as.matrix((Query_d > 0) + 0)
   }
+
+  if(is.null(Qspecies)){
+    Qspecies <- refMod@species
+    cat(paste("Assuming that the query data is same species as refmod:", Qspecies, "\n"))
+    }
+
+  if(Qspecies != refMod@species) {
+    if(is.null(ortoDict)){
+      print(paste("Retrieving the orthologous genes between", Qspecies, "and", refMod@species, "..."))
+      ref_f <- ExtractHierModfeatures(refMod = refMod)
+      print(length(ref_f))
+      ortoDict <- GetOrtologs(Genes_r = ref_f, species_r = refMod@species, species_q = Qspecies)
+      assign("ortoDict", ortoDict, .GlobalEnv)
+    }
+    Query_d <- Query_d[which(rownames(Query_d) %in% ortoDict[, paste(Qspecies, "homolog_associated_gene_name", sep = "_")]), ]
+    rownames(Query_d) <- ortoDict[match(rownames(Query_d), ortoDict[, paste(Qspecies, "homolog_associated_gene_name", sep = "_")]), 'external_gene_name']
+    print(dim(Query_d))
+  }
+
+  HieMetObj <- CTTraverser(Query = Query_d, refMod = refMod, ...)
+
   #Evaluate scores and run uncertainty function, then, project the class labels.
-  #ScoreEvals <- ScoreEval(ScoreObs = HieMetObj@Scores, tree=refMod@tree[[1]], ProbCert = HieMetObj@QueCers, alpha=refMod@alpha[[1]])
-  ScoreEvals <- ScoreEvaluate(ProbCert = HieMetObj@QueCers, tree=refMod@tree[[1]])
+  ScoreEvals <- ScoreEvaluate(ProbCert = HieMetObj@QueCers, tree=refMod@tree[[1]], alphaList = refMod@alphas, ...)
   if ( class(Query) == "Seurat" ){
-    Query@meta.data <- cbind(Query@meta.data[, which(!colnames(Query@meta.data) %in% colnames(ScoreEvals))],
-                             ScoreEvals)
+    Query@meta.data <- cbind(Query@meta.data[, which(!colnames(Query@meta.data) %in% colnames(ScoreEvals))], ScoreEvals)
     object <- Query
   }else{
     object <- new(Class = "HieRFIT",
@@ -78,35 +82,31 @@ HieRFIT <- function(Query, refMod, Prior=NULL, xSpecies=NULL, ortoDict=NULL){
                   ClassProbs = HieMetObj@Pvotes,
                   ClassWeights = HieMetObj@QueWs,
                   CertaintyValues = HieMetObj@QueCers,
-                  ClassScores = HieMetObj@Scores,
-                  Evaluation = ScoreEvals)
+                  Evaluation = ScoreEvals,
+                  tree = refMod@tree)
   }
-
+  cat("Successfull!\n")
   return(object)
 }
 
 #' A hierarchical Classifier Tree Traverser function.
 #' @param Query is the input query data. rows are genes and columns are cells.
-#' @param tree a tree topology with which hrf model was trained on. 'phylo' format.
-#' @param hiemods models list from HieRandForest function.
+#' @param refMod model from HieRandForest function.
 #' @param thread number of workers to be used for parallel processing. Default is Null, so serial processing.
-CTTraverser <- function(Query, tree, hiemods, thread=NULL){
-
-  node.list <- DigestTree(tree = tree)
+CTTraverser <- function(Query, refMod, thread=NULL, ...){
+  cat("Gathering the scores...\n")
+  node.list <- DigestTree(tree = refMod@tree[[1]])
   #Create a table for storing node probabilities.
-  Scores <- data.frame(row.names = colnames(Query))
   Pvotes <- data.frame(row.names = colnames(Query))
   QueWs <- data.frame(row.names = colnames(Query))
   QueCers <- data.frame(row.names = colnames(Query))
-  #fi=node.list[length(node.list)]+1
-  #node.list <- c(node.list, fi)
-  #Query_rand <- RandomizeR(df = t(Query), n = 5)
+
+  Query_R <- Shuffler(df = Query)
 
   if(is.null(thread)){
     for(i in node.list){
-      #nodeModel <- hiemods[[as.character(i)]][[1]]
-      nodeModel <- hiemods[[as.character(i)]]
-      c_f <- length(nodeModel$levels)
+      nodeModel <- refMod@model[[as.character(i)]]
+      nodeMlr <- refMod@mlr[[as.character(i)]]
       #Create QueData:
       P_dicts <- FixLab(xstring = nodeModel$finalModel$xNames)
       nodeQueData <- Query[which(rownames(Query) %in% P_dicts), ]
@@ -119,42 +119,31 @@ CTTraverser <- function(Query, tree, hiemods, thread=NULL){
       colnames(mp_df) <- mp
       nodeQueData <- cbind(nodeQueData, mp_df)
 
-      #Create randomized node Query data:
-      #nodeQueData_rand <- Query_rand[, which(colnames(Query_rand) %in% P_dicts)]
-      #nodeQueData_rand <- cbind(nodeQueData_rand, mp_df)
-      #nodeQueWs <- graWeighteR(model = nodeModel, QueData = nodeQueData_rand )
+      #Use randomized Query data
+      nodeQueData_R <- Query_R[which(rownames(Query_R) %in% P_dicts), ]
+      nodeQueData_R <- t(nodeQueData_R)
+      #Add the missing features matrix
+      nodeQueData_R <- cbind(nodeQueData_R, mp_df)
 
       #Calculate the probability weights of each class by random permutation:
-      nodeQueWs <- graWeighteR(model = nodeModel, QueData = nodeQueData )
-      #nodeQueWs2 <- graWeighteR2(model = nodeModel, QueData = nodeQueData )
-
+      #nodeQueWs <- CalibratedgraWeighteR(model = nodeModel, mlr = nodeMlr, QueData = nodeQueData, ...)
+      nodeQueWs <- CalibratedgraWeighteR(model = nodeModel, mlr = nodeMlr, QueData = nodeQueData_R, ...)
       #Tally votes for class from the local model:
-      nodePvotes <- PvoteR(model = nodeModel, QueData = nodeQueData)
+      nodePvotes <- CalibratedPvoteR(model = nodeModel, mlr = nodeMlr, QueData = nodeQueData, ...)
 
       #Estimate Certainty of prediction probabilities per class:
       nodeQueCers <- ceR(qP = nodePvotes, qW = nodeQueWs)
-      #Calculate node Scores:
-      #nodeScores <- scoR(model = nodeModel,
-      #                   format = "prob",
-      #                   QueData = nodeQueData,
-      #                   node = i)
-      nodeScores <- nodePvotes/nodeQueWs
-      #nodeScores <- nodePvotes
-      colnames(nodeScores) <- paste(i, colnames(nodeScores), sep = "")
-      Scores <- cbind(Scores, nodeScores)
-      #if(i != fi){
-        Pvotes <- cbind(Pvotes, nodePvotes)
-        QueWs <- cbind(QueWs, nodeQueWs)
-        QueCers <- cbind(QueCers, nodeQueCers)
-      #}
+
+      Pvotes <- cbind(Pvotes, nodePvotes)
+      QueWs <- cbind(QueWs, nodeQueWs)
+      QueCers <- cbind(QueCers, nodeQueCers)
+
     } #closes the for loop.
-    S_path_prod <- ClassProbCalculator(tree = tree, nodes_P_all = Scores)
-    #S_path_prod <- ClassProbCalculator2(tree = tree, nodes_P_all = Scores)
+
     HieMetrxObj <- new(Class = "HieMetrics",
                        Pvotes = Pvotes,
                        QueWs = QueWs,
-                       QueCers = QueCers,
-                       Scores = S_path_prod)
+                       QueCers = QueCers)
 
   }else{# FIX THIS PART! thread is specified. For now, use this only when running on bigMem machines.
     library(doParallel)
@@ -163,7 +152,7 @@ CTTraverser <- function(Query, tree, hiemods, thread=NULL){
     print(paste("registered cores is", getDoParWorkers(), sep = " "))
 
     nodeProb <- foreach(i=node.list, .inorder = TRUE, .combine=cbind) %dopar% {
-      scoR(model = hiemods[[as.character(i)]],
+      scoR(model = hiemods[[as.character(i)]],#Deprecated function
            format = "prob",
            QueData = Query,
            node = i)
@@ -175,228 +164,38 @@ CTTraverser <- function(Query, tree, hiemods, thread=NULL){
   return(HieMetrxObj)
 }
 
-
-#' A hierarchical Classifier Tree Traverser function.
+#' Tree traverser for collecting class probabilities.
 #' @param Query is the input query data. rows are genes and columns are cells.
-#' @param tree a tree topology with which hrf model was trained on. 'phylo' format.
-#' @param hiemods models list from HieRandForest function.
-#' @param thread number of workers to be used for parallel processing. Default is Null, so serial processing.
-CTTraverser.cal <- function(Query, tree, refmod, thread=NULL){
+#' @param refMod model from HieRandForest function.
+ProbTraverser <- function(Query, refMod, ...){
 
-  node.list <- DigestTree(tree = tree)
+  rownames(Query) <- FixLab(xstring = rownames(Query))
+  node.list <- DigestTree(tree = refMod@tree[[1]])
   #Create a table for storing node probabilities.
-  Scores <- data.frame(row.names = colnames(Query))
   Pvotes <- data.frame(row.names = colnames(Query))
-  QueWs <- data.frame(row.names = colnames(Query))
-  QueCers <- data.frame(row.names = colnames(Query))
-
-  if(is.null(thread)){
-    for(i in node.list){
-      nodeModel <- refmod@model[[as.character(i)]]
-      c_f <- length(nodeModel$levels)
-      #Create QueData:
-      P_dicts <- FixLab(xstring = nodeModel$finalModel$xNames)
-      nodeQueData <- Query[which(rownames(Query) %in% P_dicts), ]
-      nodeQueData <- t(nodeQueData)
-      #Add the missing features matrix
-      mp <- P_dicts[which(!P_dicts %in% colnames(nodeQueData))]
-      mp_df <- data.frame(matrix(0,
-                                 ncol = length(mp),
-                                 nrow = length(colnames(Query))))
-      colnames(mp_df) <- mp
-      nodeQueData <- cbind(nodeQueData, mp_df)
-
-      #Create randomized node Query data:
-      #nodeQueData_rand <- Query_rand[, which(colnames(Query_rand) %in% P_dicts)]
-      #nodeQueData_rand <- cbind(nodeQueData_rand, mp_df)
-      #nodeQueWs <- graWeighteR(model = nodeModel, QueData = nodeQueData_rand )
-
-      #Calculate the probability weights of each class by random permutation:
-      #nodeQueWs <- graWeighteR(model = nodeModel, QueData = nodeQueData )
-      #nodeQueWs2 <- graWeighteR2(model = nodeModel, QueData = nodeQueData )
-      nodeQueWs <- CalibratedgraWeighteR(model = nodeModel, QueData = nodeQueData)
-      #nodeQueWs <- graWeighteR3(model = nodeModel, QueData = nodeQueData)
-
-      #Tally votes for class from the local model:
-      #nodePvotes <- PvoteR(model = nodeModel, QueData = nodeQueData)
-      nodePvotes <- CalibratedPvoteR(model = nodeModel, QueData = nodeQueData)
-
-      #Estimate Certainty of prediction probabilities per class:
-      nodeQueCers <- ceR(qP = nodePvotes, qW = nodeQueWs)
-      #Calculate node Scores:
-      #nodeScores <- scoR(model = nodeModel,
-      #                   format = "prob",
-      #                   QueData = nodeQueData,
-      #                   node = i)
-      nodeScores <- nodePvotes/nodeQueWs
-      #nodeScores <- nodePvotes
-      colnames(nodeScores) <- paste(i, colnames(nodeScores), sep = "")
-      Scores <- cbind(Scores, nodeScores)
-      #if(i != fi){
-      Pvotes <- cbind(Pvotes, nodePvotes)
-      QueWs <- cbind(QueWs, nodeQueWs)
-      QueCers <- cbind(QueCers, nodeQueCers)
-      #}
-    } #closes the for loop.
-    S_path_prod <- ClassProbCalculator(tree = tree, nodes_P_all = Scores)
-    #S_path_prod <- ClassProbCalculator2(tree = tree, nodes_P_all = Scores)
-    HieMetrxObj <- new(Class = "HieMetrics",
-                       Pvotes = Pvotes,
-                       QueWs = QueWs,
-                       QueCers = QueCers,
-                       Scores = S_path_prod)
-
-  }else{# FIX THIS PART! thread is specified. For now, use this only when running on bigMem machines.
-    library(doParallel)
-    cl <- makePSOCKcluster(thread)
-    registerDoParallel(cl)
-    print(paste("registered cores is", getDoParWorkers(), sep = " "))
-
-    nodeProb <- foreach(i=node.list, .inorder = TRUE, .combine=cbind) %dopar% {
-      scoR(model = hiemods[[as.character(i)]],
-           format = "prob",
-           QueData = Query,
-           node = i)
-    }
-    stopCluster(cl)
-    ProbTab <- cbind(ProbTab, nodeProb)
+  for(i in node.list){
+    nodeModel <- refMod@model[[as.character(i)]]
+    #Create QueData:
+    P_dicts <- FixLab(xstring = nodeModel$finalModel$xNames)
+    nodeQueData <- Query[which(rownames(Query) %in% P_dicts), ]
+    nodeQueData <- t(nodeQueData)
+    #Add the missing features matrix
+    mp <- P_dicts[which(!P_dicts %in% colnames(nodeQueData))]
+    mp_df <- data.frame(matrix(0,
+                               ncol = length(mp),
+                               nrow = length(colnames(Query))))
+    colnames(mp_df) <- mp
+    nodeQueData <- cbind(nodeQueData, mp_df)
+    #Tally votes for class from the local model:
+    nodePvotes <- PvoteR(model = nodeModel, QueData = nodeQueData)
+    Pvotes <- cbind(Pvotes, nodePvotes)
   }
 
-  return(HieMetrxObj)
+  return(Pvotes)
 }
-
-#' A hierarchical Classifier Tree Traverser function.
-#' @param Query is the input query data. rows are genes and columns are cells.
-#' @param tree a tree topology with which hrf model was trained on. 'phylo' format.
-#' @param hiemods models list from HieRandForest function.
-#' @param thread number of workers to be used for parallel processing. Default is Null, so serial processing.
-CTTraverser4 <- function(Query, tree, hiemods, thread=NULL){
-
-  node.list <- DigestTree(tree = tree)
-  #Create a table for storing node probabilities.
-  Scores <- data.frame(row.names = colnames(Query))
-  Pvotes <- data.frame(row.names = colnames(Query))
-  QueWs <- data.frame(row.names = colnames(Query))
-  QueCers <- data.frame(row.names = colnames(Query))
-
-  if(is.null(thread)){
-    for(i in node.list){
-      nodeModel <- hiemods[[as.character(i)]]
-      c_f <- length(nodeModel$levels)
-      #Create QueData:
-      #P_dicts <- FixLab(xstring = nodeModel$finalModel$xNames)
-      P_dicts <- FixLab(xstring = rownames(nodeModel$trainPCA$rotation))
-      nodeQueData <- Query[which(rownames(Query) %in% P_dicts), ]
-      nodeQueData <- t(nodeQueData)
-      #Add the missing features matrix
-      mp <- P_dicts[which(!P_dicts %in% colnames(nodeQueData))]
-      mp_df <- data.frame(matrix(0,
-                                 ncol = length(mp),
-                                 nrow = length(colnames(Query))))
-      colnames(mp_df) <- mp
-      nodeQueData <- cbind(nodeQueData, mp_df)
-
-      #Calculate the probability weights of each class by random permutation:
-      nodeQueWs <- graWeighteR4(model = nodeModel, QueData = nodeQueData )
-      #Tally votes for class from the local model:
-      nodePvotes <- PvoteR4(model = nodeModel, QueData = nodeQueData)
-      #Estimate Certainty of prediction probabilities per class:
-      nodeQueCers <- ceR(qP = nodePvotes, qW = nodeQueWs)
-      #Calculate node Scores:
-      nodeScores <- nodePvotes/nodeQueWs
-      colnames(nodeScores) <- paste(i, colnames(nodeScores), sep = "")
-      Scores <- cbind(Scores, nodeScores)
-
-      Pvotes <- cbind(Pvotes, nodePvotes)
-      QueWs <- cbind(QueWs, nodeQueWs)
-      QueCers <- cbind(QueCers, nodeQueCers)
-
-    } #closes the for loop.
-    S_path_prod <- ClassProbCalculator(tree = tree, nodes_P_all = Scores)
-    HieMetrxObj <- new(Class = "HieMetrics",
-                       Pvotes = Pvotes,
-                       QueWs = QueWs,
-                       QueCers = QueCers,
-                       Scores = S_path_prod)
-
-  }else{
-    library(doParallel)
-    cl <- makePSOCKcluster(thread)
-    registerDoParallel(cl)
-    print(paste("registered cores is", getDoParWorkers(), sep = " "))
-
-    nodeProb <- foreach(i=node.list, .inorder = TRUE, .combine=cbind) %dopar% {
-      scoR(model = hiemods[[as.character(i)]],
-           format = "prob",
-           QueData = Query,
-           node = i)
-    }
-    stopCluster(cl)
-    ProbTab <- cbind(ProbTab, nodeProb)
-  }
-
-  return(HieMetrxObj)
-}
-
 
 #' A function to tally votes from the model locally trained.
-#' @param model
-#' @param QueData is the prepared data matrix ready to be used in predict
-#' @param format type of prediction output, "prob" or "resp".
-PvoteR4 <- function(model, QueData, format="prob", node=NULL){
-
-  QueDataPCs <- predict(model$trainPCA, newdata = QueData)
-  QueDataPCs <- as.data.frame(QueDataPCs)
-
-  # if(is.null(node)){
-  #   QuePvotes <- as.data.frame(predict(model, newdata=QueDataPCs, type = "prob", scale=T, center=T))
-  # } else{
-  #   if(format == "prob"){
-  #     QuePvotes <- as.data.frame(predict(model, newdata=QueDataPCs, type = "prob", scale=T, center=T))
-  #     colnames(QuePvotes) <- paste(node, colnames(QuePvotes), sep = "")
-  #   } else {
-  #     QuePvotes <- as.data.frame(predict(model, newdata=QueDataPCs, type = "raw", scale=T, center=T))
-  #     colnames(QuePvotes) <- as.character(node)
-  #   }
-  # }
-  if(is.null(node)){
-    QuePvotes <- as.data.frame(predict(model, newdata=QueDataPCs, type = "prob", scale=F, center=F))
-  } else{
-    if(format == "prob"){
-      QuePvotes <- as.data.frame(predict(model, newdata=QueDataPCs, type = "prob", scale=F, center=F))
-      colnames(QuePvotes) <- paste(node, colnames(QuePvotes), sep = "")
-    } else {
-      QuePvotes <- as.data.frame(predict(model, newdata=QueDataPCs, type = "raw", scale=F, center=F))
-      colnames(QuePvotes) <- as.character(node)
-    }
-  }
-  return(QuePvotes)
-}
-
-#' A function to calculate gravitity center (weight center) of the probability distributions
-#' among classes of the node. By permutation.
-#' @param model of the node.
-#' @param QueData same matrix used in PvoteR().
-#' @return QueWeights a set of probability weightes per class to be used in asymetrix entropy estimations.
-graWeighteR4 <- function(model, QueData){
-  #Randomizing only feature space
-  #QueData_R <- RandomizeR(df = QueData, n = 20)
-  QueData_R <- Shuffler(df = QueData)
-  #QueData_R <- Rander(df = QueData)
-  pvts_R <- PvoteR4(model = model, QueData = QueData_R)
-  #Ws <- apply(pvts_R, 2, mean) + apply(pvts_R, 2, sd)
-  #Ws <- apply(pvts_R, 2, mean) + apply(pvts_R, 2, sd)/sqrt(dim(pvts_R)[1])
-  Ws <- apply(pvts_R, 2, mean)
-  #Ws <- colMeans(PvoteR(model = model, QueData = QueData_R))
-  QueWeights <- t(as.data.frame(Ws))[rep(1, each=nrow(QueData)), ]
-  QueWeights <- as.data.frame(QueWeights)
-  return(QueWeights)
-}
-
-
-
-#' A function to tally votes from the model locally trained.
-#' @param model
+#' @param model local classifier.
 #' @param QueData is the prepared data matrix ready to be used in predict
 #' @param format type of prediction output, "prob" or "resp".
 PvoteR <- function(model, QueData, format="prob", node=NULL){
@@ -415,133 +214,62 @@ PvoteR <- function(model, QueData, format="prob", node=NULL){
 }
 
 #' A function to tally votes from the model locally trained.
-#' @param model
+#' @param model local classifier.
 #' @param QueData is the prepared data matrix ready to be used in predict
 #' @param format type of prediction output, "prob" or "resp".
-CalibratedPvoteR.LR <- function(model, refmod, QueData, format="prob", node=NULL){
-  if(is.null(node)){
-    QuePvotes <- as.data.frame(predict(model, newdata=QueData, type = "prob", scale=T, center=T))
-  } else{
-    if(format == "prob"){
+CalibratedPvoteR <- function(model, mlr, QueData, format="prob", package='caret', node=NULL, ...){
+
+  if(package == 'scikit'){
+    if(is.null(node)){
+      QuePvotes <- as.data.frame(ski_predict(fit=model, newdata=QueData, type = "prob"))
+    }else{
+      if(format == "prob"){
+        QuePvotes <- as.data.frame(ski_predict(fit=model, newdata=QueData, type = "prob"))
+        colnames(QuePvotes) <- paste(node, colnames(QuePvotes), sep = "")
+      }else{
+        QuePvotes <- as.data.frame(ski_predict(fit=model, newdata=QueData, type = "raw"))
+        colnames(QuePvotes) <- as.character(node)
+      }
+    }
+  }else{
+    if(is.null(node)){
       QuePvotes <- as.data.frame(predict(model, newdata=QueData, type = "prob", scale=T, center=T))
-      colnames(QuePvotes) <- paste(node, colnames(QuePvotes), sep = "")
-    } else {
-      QuePvotes <- as.data.frame(predict(model, newdata=QueData, type = "raw", scale=T, center=T))
-      colnames(QuePvotes) <- as.character(node)
+    }else{
+      if(format == "prob"){
+        QuePvotes <- as.data.frame(predict(model, newdata=QueData, type = "prob", scale=T, center=T))
+        colnames(QuePvotes) <- paste(node, colnames(QuePvotes), sep = "")
+      }else{
+        QuePvotes <- as.data.frame(predict(model, newdata=QueData, type = "raw", scale=T, center=T))
+        colnames(QuePvotes) <- as.character(node)
+      }
     }
   }
   #Calibrate the probabilities:
-  QuePvotes.cal <- data.frame(row.names = rownames(QuePvotes))
-  for(class in model$finalModel$classes){
-    prep.cal <- predict(refmod@sigmoids[[class]],
-                        data.frame(x=QuePvotes[, class]),
-                        type="response")
-    Calibrated_and_Scaled = (prep.cal - min(prep.cal))/(max(prep.cal) - min(prep.cal))
-    QuePvotes.cal <- cbind(QuePvotes.cal, data.frame(class=Calibrated_and_Scaled))
-  }
-  colnames(QuePvotes.cal) <- model$finalModel$classes
+  QuePvotes.cal <- predict(mlr, newdata=QuePvotes, type="prob")
 
-  return(QuePvotes.cal)
-}
-
-#' A function to tally votes from the model locally trained.
-#' @param model
-#' @param QueData is the prepared data matrix ready to be used in predict
-#' @param format type of prediction output, "prob" or "resp".
-CalibratedPvoteR <- function(model, QueData, format="prob", node=NULL){
-  if(is.null(node)){
-    QuePvotes <- as.data.frame(predict(model, newdata=QueData, type = "prob", scale=T, center=T))
-  } else{
-    if(format == "prob"){
-      QuePvotes <- as.data.frame(predict(model, newdata=QueData, type = "prob", scale=T, center=T))
-      colnames(QuePvotes) <- paste(node, colnames(QuePvotes), sep = "")
-    } else {
-      QuePvotes <- as.data.frame(predict(model, newdata=QueData, type = "raw", scale=T, center=T))
-      colnames(QuePvotes) <- as.character(node)
-    }
-  }
-  print(head(QuePvotes))
-
-  #Calibrate the probabilities:
-  QuePvotes.cal <- predict(model$mlr, newdata=QuePvotes, type="prob")
-  print(head(QuePvotes.cal))
-
-  if(dim(QuePvotes)[2] < 3){
+  if(is.null(dim(QuePvotes))){
     print("dim(QuePvotes)[2] < 3")
     QuePvotes.cal <- data.frame(QuePvotes.cal, 1-QuePvotes.cal)
     colnames(QuePvotes.cal) <- colnames(QuePvotes)#Double-check the colnames.
   }
-  Calibrated_and_Scaled <- data.frame(row.names = rownames(QuePvotes.cal))
-  for(class in colnames(QuePvotes.cal)){
-    vec <- QuePvotes.cal[, class]
-    vec <- (vec - min(vec))/(max(vec) - min(vec))
-    Calibrated_and_Scaled <- cbind(Calibrated_and_Scaled, data.frame(class=vec))
-  }
-  colnames(Calibrated_and_Scaled) <- colnames(QuePvotes.cal)
-  print(head(Calibrated_and_Scaled))
-  return(Calibrated_and_Scaled)
+
+  return(QuePvotes.cal)
 }
 
 #' A function to calculate gravitity center (weight center) of the probability distributions
 #' among classes of the node. By permutation.
 #' @param model of the node.
+#' @param mlr multinominal logistic regression model for calibrating the probabilities with Platt scaling, aka sigmoid calibration.
 #' @param QueData same matrix used in PvoteR().
 #' @return QueWeights a set of probability weightes per class to be used in asymetrix entropy estimations.
-CalibratedgraWeighteR <- function(model, QueData){
+CalibratedgraWeighteR <- function(model, mlr, QueData, ...){
   #Randomizing only feature space
-  #QueData_R <- RandomizeR(df = QueData, n = 20)
-  #QueData_R <- Rander(df = QueData)
-  print("Running CalibratedgraWeighteR...")
   QueData_R <- Shuffler(df = QueData)
-  pvts_R <- CalibratedPvoteR(model = model, QueData = QueData_R)
-  #Ws <- apply(pvts_R, 2, mean) + apply(pvts_R, 2, sd)
-  #Ws <- apply(pvts_R, 2, mean) + apply(pvts_R, 2, sd)/sqrt(dim(pvts_R)[1])
+  pvts_R <- CalibratedPvoteR(model = model, mlr = mlr, QueData = QueData_R, ...)
   Ws <- apply(pvts_R, 2, mean)
-  #Ws <- colMeans(PvoteR(model = model, QueData = QueData_R))
   QueWeights <- t(as.data.frame(Ws))[rep(1, each=nrow(QueData)), ]
   QueWeights <- as.data.frame(QueWeights)
   return(QueWeights)
-}
-#' A function to calculate gravitity center (weight center) of the probability distributions
-#' among classes of the node. By permutation.
-#' @param model of the node.
-#' @param QueData same matrix used in PvoteR().
-#' @return QueWeights a set of probability weightes per class to be used in asymetrix entropy estimations.
-graWeighteR <- function(model, QueData){
-  #Randomizing only feature space
-  #QueData_R <- RandomizeR(df = QueData, n = 20)
-  #QueData_R <- Rander(df = QueData)
-  QueData_R <- Shuffler(df = QueData)
-  pvts_R <- PvoteR(model = model, QueData = QueData_R)
-  #Ws <- apply(pvts_R, 2, mean) + apply(pvts_R, 2, sd)
-  #Ws <- apply(pvts_R, 2, mean) + apply(pvts_R, 2, sd)/sqrt(dim(pvts_R)[1])
-  Ws <- apply(pvts_R, 2, mean)
-  #Ws <- colMeans(PvoteR(model = model, QueData = QueData_R))
-  QueWeights <- t(as.data.frame(Ws))[rep(1, each=nrow(QueData)), ]
-  QueWeights <- as.data.frame(QueWeights)
-  return(QueWeights)
-}
-
-graWeighteR3 <- function(model, QueData){
-  allZero <- QueData
-  allZero[1:ncol(allZero),] <- 0
-  allZero[,1:ncol(allZero)] <- 0
-  pvts_R <- PvoteR(model = model, QueData = allZero)
-  Ws <- apply(pvts_R, 2, mean)
-  #Ws <- colMeans(PvoteR(model = model, QueData = QueData_R))
-  QueWeights <- t(as.data.frame(Ws))[rep(1, each=nrow(QueData)), ]
-  QueWeights <- as.data.frame(QueWeights)
-  return(QueWeights)
-  return(QueWeights)
-}
-
-graWeighteR2 <- function(model, QueData){
-  #Randomizing only feature space
-  QueData_R <- RandomizeR(df = QueData, n = 20)
-  QueData_R <- QueData_R[sample(rownames(QueData_R), size = nrow(QueData)),]
-  pvts_R <- PvoteR(model = model, QueData = QueData_R)
-  pvts_R <- as.data.frame(pvts_R)
-  return(pvts_R)
 }
 
 #' Certainty Estimation function. Calculates certainty values for each class probability.
@@ -549,6 +277,7 @@ graWeighteR2 <- function(model, QueData){
 #' @param qW Probability weights estimated by graWeighteR()
 #' @return QueCers
 ceR <- function(qP, qW){
+  qW <- qW + 1e-05#to prevent math error.
   QueCers <- NULL
   qL <- qP > qW
   qL <- ifelse(qL == TRUE, 1, -1)
@@ -559,97 +288,29 @@ ceR <- function(qP, qW){
   return(QueCers)
 }
 
-#' The predictor function. REDUNDANT!!!
-#' @param model
-#' @param QueData
-#' @param format type of prediction output, "prob" or "resp".
-scoR <- function(model, QueData, format="prob", node=NULL){
-
-  if(is.null(node)){
-    QuePred <- as.data.frame(predict(model, QueData, type = "prob", scale=T, center=T))
-  } else{
-    if(format == "prob"){
-      c_f <- length(model$levels) #correction factor; class size
-      QuePred <- as.data.frame(predict(model, QueData, type = "prob", scale=T, center=T))
-      #      QuePred <- as.data.frame(t(apply(QuePred, 1, function(x) KLeCalc(x)*x)))
-      QuePred <- QuePred*c_f
-      colnames(QuePred) <- paste(node, colnames(QuePred), sep = "")
-    } else {
-      QuePred <- as.data.frame(predict(model, QueData, type = "raw", scale=T, center=T))
-      colnames(QuePred) <- as.character(node)
-    }
+#' Get the best class
+#' @param vec vector of scores.
+#' @param alphaList list of alpha threshold of each class.
+#' @param class whether the output is class or its score.
+GetCls <- function(vec, alphaList, class, ...){
+  alphaList <- t(as.data.frame(alphaList))
+  cert.vec <- vec > alphaList[, "Low.ext"]
+  candits <- names(cert.vec)[cert.vec]
+  if(identical(candits, character(0)) ){
+    if(class){cls.out <- "Undetermined"}else{cls.out <- 0}
+  }else{
+    if(class){cls.out <- names(which.max(vec[candits]))}else{cls.out <- max(vec[candits])}
   }
-  return(QuePred)
-}
-
-#' A function to find the full path of all true ancestors:
-#' @param PCertVector Probability certainty table.
-#' @param tree a tree topology with which hrf model was trained on. 'phylo' format.
-CandidateDetector <- function(PCertVector, tree){
-
-  labs_l <- c(tree$tip.label, tree$node.label)#The order is important! tips first. Don't change!#New
-  labs_l <- labs_l[!labs_l %in% "TaxaRoot"] #Double-check#New
-  Path_nodes_of_candits <- NULL
-  CandidNodes <- NULL
-  for(node.lab in labs_l){
-    AncPath <- GetAncestPath(tree = tree, class = node.lab, labels = T)
-    if(all(as.logical(PCertVector[AncPath])) & !(AncPath[1] %in% Path_nodes_of_candits)){
-      CandidNodes <- c(CandidNodes, AncPath[1])
-      Path_nodes_of_candits <- unique(c(Path_nodes_of_candits, AncPath[2:length(AncPath)]))
-    }
-  }
-  return(CandidNodes[!CandidNodes %in% Path_nodes_of_candits])
-}
-
-#' A function to find the full path of all true ancestors:
-#' @param PCertVector Probability certainty table.
-#' @param tree a tree topology with which hrf model was trained on. 'phylo' format.
-CandidateDetector2 <- function(PCertVector, tree, alpha=0){
-  labs_l <- c(tree$tip.label, tree$node.label)#The order is important! tips first. Don't change!#New
-  labs_l <- labs_l[!labs_l %in% "TaxaRoot"] #Double-check#New
-  Path_nodes_of_candits <- NULL
-  CandidNodes <- NULL
-  for(node.lab in labs_l){
-    AncPath <- GetAncestPath(tree = tree, class = node.lab, labels = T)
-    if( (mean(as.numeric(PCertVector[AncPath])) > alpha) &
-        !(AncPath[1] %in% Path_nodes_of_candits) #&
-        #as.numeric(PCertVector[AncPath[1]]) > alpha
-        ){
-      CandidNodes <- c(CandidNodes, AncPath[1])
-      Path_nodes_of_candits <- unique(c(Path_nodes_of_candits, AncPath[2:length(AncPath)]))
-    }
-  }
-  return(CandidNodes)
-}
-
-#' A function to find the full path of all true ancestors:
-#' @param PCertVector Probability certainty table.
-#' @param tree a tree topology with which hrf model was trained on. 'phylo' format.
-#' @param alphas a list of numeric values of node specific alpha thresholds. Learned from reference data.
-CandidateDetector3 <- function(PCertVector, tree, alphas){
-  labs_l <- c(tree$tip.label, tree$node.label)#The order is important! tips first. Don't change!#New
-  labs_l <- labs_l[!labs_l %in% "TaxaRoot"] #Double-check#New
-  Path_nodes_of_candits <- NULL
-  CandidNodes <- NULL
-  for(node.lab in labs_l){
-    AncPath <- GetAncestPath(tree = tree, class = node.lab, labels = T)
-    #if( all(PCertVector[AncPath] > alphas[[node.lab]]) &
-    if( (mean(as.numeric(PCertVector[AncPath])) > mean(as.numeric(alphas[[node.lab]]))) &
-        !(AncPath[1] %in% Path_nodes_of_candits)
-    ){
-      CandidNodes <- c(CandidNodes, AncPath[1])
-      Path_nodes_of_candits <- unique(c(Path_nodes_of_candits, AncPath[2:length(AncPath)]))
-    }
-  }
-  return(CandidNodes)
+  return(cls.out)
 }
 
 #' A function for evalating the uncertainty.
-#' @param ScoreObs P_path_prod for observed scores
 #' @param ProbCert Certainty scores.
 #' @param tree a tree topology with which hrf model was trained on. 'phylo' format.
-ScoreEvaluate <- function(ProbCert, tree, alpha=0){
-
+#' @param full.tbl if true, only the entire score table is returned.
+#' @param alphaList list of alpha threshold of each class.
+ScoreEvaluate <- function(ProbCert, tree, full.tbl=FALSE, alphaList=NULL, ...){
+  cat("Evaluating the scores...\n")
   labs_l <- c(tree$tip.label, tree$node.label)#The order is important! tips first. Don't change!#New
   labs_l <- labs_l[!labs_l %in% "TaxaRoot"]
 
@@ -689,7 +350,7 @@ ScoreEvaluate <- function(ProbCert, tree, alpha=0){
 
     }else{
       cpaths_sum <- data.frame( ProbCert[, AncPath])
-      #cpaths_out <- data.frame(rep(0, length(ProbCert[,1])), row.names = rownames(ProbCert))#NEW
+      cpaths_out <- data.frame(rep(0, length(ProbCert[,1])), row.names = rownames(ProbCert))#NEW#double check the commentout
     }
     colnames(cpaths_sum) <- cl
     colnames(cpaths_out) <- cl
@@ -701,91 +362,19 @@ ScoreEvaluate <- function(ProbCert, tree, alpha=0){
   }
 
   CertScore = path_sums - paths_outs - all_sibs### ****
-  print(head(CertScore))
-  cl.CertScore.cmax <- colnames(CertScore)[apply(CertScore, 1, which.max)]
-  CertScoremax <- apply(CertScore, 1, function(x) max(x))
 
-  df <- data.frame(Score = CertScoremax,
-                   Projection = cl.CertScore.cmax)
-  return(df)
-}
-
-
-#' A function for evalating the uncertainty.
-#' @param ScoreObs P_path_prod for observed scores
-#' @param ProbCert Certainty scores.
-#' @param tree a tree topology with which hrf model was trained on. 'phylo' format.
-ScoreEval <- function(ScoreObs, ProbCert, tree, alpha=0){
-
-  df <- data.frame(row.names = rownames(ScoreObs))
-  for(i in 1:length(ProbCert[,1])){
-    #candits <- colnames(ProbCert)[ProbCert[i,] > alpha]
-    #candits <- CandidateDetector(PCertVector = ProbCert.logic[i,], tree=tree)
-    candits <- CandidateDetector2(PCertVector = ProbCert[i,], tree=tree, alpha=alpha)
-    #candits <- CandidateDetector3(PCertVector = ProbCert[i,], tree=tree, alphas=alpha)
-    if(length(candits) == 0){
-      classL <- "Undetermined"
-      classU <- max(ProbCert[i,])
-      classS <- max(ScoreObs[i,])
-    }else if(length(candits) == 1){
-      classL <- candits
-      #classU <- ProbCert[i,classL]
-      AncPath <- GetAncestPath(tree = tree, class = classL, labels = T)
-      if(length(AncPath) > 1){classU <- rowMeans(ProbCert[i, AncPath])}else{classU <- ProbCert[i, AncPath]}
-      classS <- ScoreObs[i, classL]
+  if(full.tbl){
+    return(CertScore)
+  }else{
+    if(!is.null(alphaList)){
+      cl.CertScore.cmax <- apply(CertScore, 1, GetCls, alphaList=alphaList, class=TRUE)
+      CertScoremax <- apply(CertScore, 1, GetCls, alphaList=alphaList, class=FALSE)
     }else{
-      classL <- colnames(ScoreObs[i,candits])[apply(ScoreObs[i,candits], 1, which.max)]
-      #classL <- colnames(ProbCert[i,candits])[apply(ProbCert[i,candits], 1, which.max)]
-      #classU <- ProbCert[i,classL]
-      AncPath <- GetAncestPath(tree = tree, class = classL, labels = T)
-      if(length(AncPath) > 1){classU <- rowMeans(ProbCert[i, AncPath])}else{classU <- ProbCert[i, AncPath]}
-      classS <- ScoreObs[i, classL]
+      cl.CertScore.cmax <- colnames(CertScore)[apply(CertScore, 1, which.max)]
+      CertScoremax <- apply(CertScore, 1, function(x) max(x))
     }
-
-    df <- rbind(df, data.frame(row.names = rownames(ProbCert[i,]),
-                               Score = classS,
-                               Certainty = classU,
-                               Projection = classL))
+    df <- data.frame(Score = CertScoremax,
+                     Projection = cl.CertScore.cmax)
+    return(df)
   }
-  return(df)
-}
-
-#' A function to calculate class scores for all internal and tip node classes.
-#' @param tree
-#' @param nodes_P_all a table output from CTTraverser() which contains all class probabilities from every node.
-#' @return P_path_prod a table for products of ancestor node scores.
-ClassProbCalculator <- function(tree, nodes_P_all){
-  P_path_prod <- data.frame(row.names = rownames(nodes_P_all))
-  clabs <- c(tree$tip.label, tree$node.label)[tree$edge[, 2]]
-  for(cl in clabs){
-    map <- GetAncestPath(tree = tree, class = cl)
-    if(length(map) > 1){
-      nt_prob <- data.frame(apply(nodes_P_all[, map], 1, prod))
-    }else{
-      nt_prob <- data.frame(nodes_P_all[,map])
-    }
-    colnames(nt_prob) <- cl
-    P_path_prod <- cbind(P_path_prod, nt_prob)
-  }
-  return(P_path_prod)
-}
-
-ClassProbCalculator2 <- function(tree, nodes_P_all){
-  P_path_prod <- data.frame(row.names = rownames(nodes_P_all))
-  clabs <- c(tree$tip.label, tree$node.label)[tree$edge[, 2]]
-  fi=length(c(tree$tip.label, tree$node.label))+1
-  for(cl in clabs){
-    map <- GetAncestPath(tree = tree, class = cl)
-    if(cl %in% tree$tip.label){
-      map <- c(map, paste(fi, cl, sep = ""))
-    }
-    if(length(map) > 1){
-      nt_prob <- data.frame(apply(nodes_P_all[, map], 1, prod))
-    }else{
-      nt_prob <- data.frame(nodes_P_all[, map])
-    }
-    colnames(nt_prob) <- cl
-    P_path_prod <- cbind(P_path_prod, nt_prob)
-  }
-  return(P_path_prod)
 }
