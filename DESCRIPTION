@@ -19,5 +19,8 @@ Suggests:
     grid,
     gridExtra,
     biomaRt,
-    doParallel
+    doParallel,
+    DiagrammeR,
+    data.tree,
+    ggplot2
 RoxygenNote: 6.1.1
