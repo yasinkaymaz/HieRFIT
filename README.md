@@ -90,7 +90,7 @@ refmod <- CreateHieR(RefData = pbmc[["RNA"]]@data,
 After generating the model, you can save it for later use. This will create a file with .RDS extention in the working directory (i.e. 'PBMC3K_HierMod.RDS'):
 
 ```{r}
-SaveHieRMod(refMod = refmod, fileName = "PBMC3K_HierMod")
+SaveHieRMod(refMod = refmod, filePrefix = "PBMC3K_HierMod")
 
 ```
 If you desire to check the classification accuracy of the model, you can plot the percent out of bag accuracy estimations projected on each node of the classification tree as below:

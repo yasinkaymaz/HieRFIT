@@ -87,7 +87,7 @@ SaveHieRMod <- function(refMod, filePrefix="Reference.HierMod"){
     envir = attr(x$terms, ".Environment")))
   lapply(refMod@model,
     function(x) environment(x$terms) <- NULL)
-  saveRDS(refMod, file = paste(fileName,".RDS", sep = ""))
+  saveRDS(refMod, file = paste(filePrefix,".RDS", sep = ""))
 }
 
 #' Depricated hiermod loading function
