@@ -20,6 +20,27 @@ RandTreeSim <- function(LN=8, furcation="binary"){
   return(tree)
 }
 
+#' A function to downsample a refdata table based on classLabels
+#' @param RefData Reference data.
+#' @param ClassLabels the refdata storing class labels.
+#' @param min_n min number of samples to downsample each class. default is 500.
+#' @usage RefData_d <- DownSampleRef(RefData = RefData)
+DownSampleIdx <- function(RefData, ClassLabels, min_n=500, ...){
+  samp.idx <- NULL
+  classes <- table(ClassLabels)
+  if(is.null(min_n)){
+    min_n <- min(classes)
+  }
+  for(type in names(classes)){
+    if( classes[type] > min_n ){
+      samp.idx <- c(samp.idx, sample(which(ClassLabels == type), size = min_n, replace = F))
+    }else{
+      samp.idx <- c(samp.idx, which(ClassLabels == type))
+    }
+  }
+  return(samp.idx)
+}
+
 colMax <- function(data) sapply(data, max, na.rm = TRUE)
 colMin <- function(data) sapply(data, min, na.rm = TRUE)
 

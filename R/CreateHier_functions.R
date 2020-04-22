@@ -28,8 +28,13 @@ CreateHieR <- function(RefData, ClassLabels, Tree=NULL, species = "hsapiens", th
   cat(paste("Species is", species, "\n"))
   cat("Preparing the query data...\n")
   RefData <- as.matrix(RefData)
-  rownames(RefData) <- FixLab(xstring = rownames(RefData))
+  #Downsample:
+  samp.idx <- DownSampleIdx(RefData = RefData, ClassLabels = ClassLabels, ...)
+  ClassLabels <- ClassLabels[samp.idx]
+  RefData <- RefData[, samp.idx]
+
   RefData <- RefData[apply(RefData, 1, var) != 0, ]
+  rownames(RefData) <- FixLab(xstring = rownames(RefData))
   ClassLabels <- FixLab(xstring = ClassLabels)
 
   if(binarize){
