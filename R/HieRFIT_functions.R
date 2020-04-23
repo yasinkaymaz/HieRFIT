@@ -294,7 +294,8 @@ ceR <- function(qP, qW){
 #' @param class whether the output is class or its score.
 GetCls <- function(vec, alphaList, class, ...){
   alphaList <- t(as.data.frame(alphaList))
-  cert.vec <- vec > alphaList[, "Low.ext"]
+  #cert.vec <- vec > alphaList[, "Low.ext"]
+  cert.vec <- vec > 0.05
   candits <- names(cert.vec)[cert.vec]
   if(identical(candits, character(0)) ){
     if(class){cls.out <- "Undetermined"}else{cls.out <- 0}

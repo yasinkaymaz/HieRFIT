@@ -212,8 +212,8 @@ HieRandForest <- function(RefData, ClassLabels, tree, thread, RPATH=NULL, ...){
 
   Rdata <- as.data.frame(t(RefData))
   colnames(Rdata) <- FixLab(xstring = colnames(Rdata))
-  Rdata$ClassLabels <- factor(make.names(ClassLabels))
-
+  Rdata$ClassLabels <- factor(ClassLabels)
+  print(table(Rdata$ClassLabels))
   pb <- txtProgressBar(min = 0, max = length(node.list), style = 3)
   p=1
   if(is.null(thread)){
