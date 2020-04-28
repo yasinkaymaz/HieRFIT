@@ -293,9 +293,9 @@ ceR <- function(qP, qW){
 #' @param alphaList list of alpha threshold of each class.
 #' @param class whether the output is class or its score.
 GetCls <- function(vec, alphaList, class, ...){
-  alphaList <- t(as.data.frame(alphaList))
+  #alphaList <- t(as.data.frame(alphaList))
   #cert.vec <- vec > alphaList[, "Low.ext"]
-  cert.vec <- vec > 0.05
+  cert.vec <- vec > alphaList
   candits <- names(cert.vec)[cert.vec]
   if(identical(candits, character(0)) ){
     if(class){cls.out <- "Undetermined"}else{cls.out <- 0}

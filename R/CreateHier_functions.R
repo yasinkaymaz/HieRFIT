@@ -10,7 +10,7 @@ RefMod <- setClass(Class = "RefMod",
                    slots = c(model = "list",
                              tree = "list",
                              mlr = "list",
-                             alphas = "list",
+                             alphas = "numeric",
                              species = "character"))#Add treeTable
 
 #' The main function for creating a reference model.
@@ -20,7 +20,7 @@ RefMod <- setClass(Class = "RefMod",
 #' @param species The organism from which the reference data generated. Allowed species are scientific species names, e.g. 'Homo sapiens'.
 #' @param thread number of workers to be used for parallel processing. Default is Null, so serial processing.
 #' @usage  pbmc.refmod <- CreateRef(RefData = as.matrix(pbmc@data), ClassLabels = pbmc@meta.data$ClusterNames_0.6, TreeFile = pbmc3k_tree)
-CreateHieR <- function(RefData, ClassLabels, Tree=NULL, species = "hsapiens", thread=NULL, injectNoise=FALSE, binarize=FALSE, ...){
+CreateHieR <- function(RefData, ClassLabels, Tree=NULL, species = "hsapiens", thread=NULL, injectNoise=FALSE, binarize=FALSE, alpha=0.05, ...){
   options(warn=-1)
   if(missing(ClassLabels) || missing(RefData)){
     stop("Please, provide the required inputs! ClassLabels or RefData is missing.")
@@ -70,8 +70,8 @@ CreateHieR <- function(RefData, ClassLabels, Tree=NULL, species = "hsapiens", th
   #Get sigmoid functions for probability calibrations:
   refObj <- GetSigMods(RefData = RefData, ClassLabels = ClassLabels, refMod = refObj, ...)
   #Determine the alphas
-  refObj@alphas <- DetermineAlphas(refMod = refObj, RefData = RefData, Prior = ClassLabels, ...)
-
+  #refObj@alphas <- DetermineAlphas(refMod = refObj, RefData = RefData, Prior = ClassLabels, ...)
+  refObj@alphas <- alpha
   cat("Successfull!\n")
   #foreach::registerDoSEQ()
   return(refObj)
@@ -213,7 +213,7 @@ HieRandForest <- function(RefData, ClassLabels, tree, thread, RPATH=NULL, ...){
   Rdata <- as.data.frame(t(RefData))
   colnames(Rdata) <- FixLab(xstring = colnames(Rdata))
   Rdata$ClassLabels <- factor(ClassLabels)
-  print(table(Rdata$ClassLabels))
+
   pb <- txtProgressBar(min = 0, max = length(node.list), style = 3)
   p=1
   if(is.null(thread)){
