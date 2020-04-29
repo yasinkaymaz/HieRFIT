@@ -247,9 +247,8 @@ CalibratedPvoteR <- function(model, mlr, QueData, format="prob", package='caret'
   #Calibrate the probabilities:
   QuePvotes.cal <- predict(mlr, newdata=QuePvotes, type="prob")
 
-  if(is.null(dim(QuePvotes))){
-    print("dim(QuePvotes)[2] < 3")
-    QuePvotes.cal <- data.frame(QuePvotes.cal, 1-QuePvotes.cal)
+  if(is.null(dim(QuePvotes.cal))){
+    QuePvotes.cal <- data.frame(1-QuePvotes.cal, QuePvotes.cal)
     colnames(QuePvotes.cal) <- colnames(QuePvotes)#Double-check the colnames.
   }
 

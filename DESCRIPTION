@@ -13,7 +13,8 @@ Imports:
     methods,
     ape,
     data.tree,
-    caret
+    caret,
+    nnet
 Suggests:
     Seurat,
     grid,
