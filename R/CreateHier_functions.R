@@ -10,7 +10,7 @@ RefMod <- setClass(Class = "RefMod",
                    slots = c(model = "list",
                              tree = "list",
                              mlr = "list",
-                             alphas = "numeric",
+                             alphas = "list",
                              species = "character"))#Add treeTable
 
 #' The main function for creating a reference model.
@@ -26,7 +26,7 @@ CreateHieR <- function(RefData, ClassLabels, Tree=NULL, species = "hsapiens", th
     stop("Please, provide the required inputs! ClassLabels or RefData is missing.")
   }
   cat(paste("Species is", species, "\n"))
-  cat("Preparing the query data...\n")
+  cat("Preparing the reference data...\n")
   RefData <- as.matrix(RefData)
   #Downsample:
   samp.idx <- DownSampleIdx(RefData = RefData, ClassLabels = ClassLabels, ...)
@@ -71,10 +71,67 @@ CreateHieR <- function(RefData, ClassLabels, Tree=NULL, species = "hsapiens", th
   refObj <- GetSigMods(RefData = RefData, ClassLabels = ClassLabels, refMod = refObj, ...)
   #Determine the alphas
   #refObj@alphas <- DetermineAlphas(refMod = refObj, RefData = RefData, Prior = ClassLabels, ...)
-  refObj@alphas <- alpha
+  refObj@alphas <- DetermineAlphaArray(refMod = refObj, RefData = RefData, Prior = ClassLabels, ...)
+  #refObj@alphas <- alpha
   cat("Successfull!\n")
   #foreach::registerDoSEQ()
   return(refObj)
+}
+
+
+#' A function to determine alpha thresholds of each class in the tree.
+#' @param refMod reference model. This will be used for self-projection.
+#' @param RefData Reference data from which class labels will be projected on Query data (in this case self-projection).
+#' @param Prior prior class labels if exist. For cross comparison. Should correspond row order of the Query.
+DetermineAlphaArray <- function(refMod, RefData, Prior, ...){
+  # cat("temp processing...")
+  # RefData <- as.matrix(RefData)
+  # samp.idx <- DownSampleIdx(RefData = RefData, ClassLabels = Prior, ...)
+  # Prior <- Prior[samp.idx]
+  # RefData <- RefData[, samp.idx]
+  # RefData <- RefData[apply(RefData, 1, var) != 0, ]
+  # rownames(RefData) <- FixLab(xstring = rownames(RefData))
+  # Prior <- FixLab(xstring = Prior)
+  cat("Now, determining the alpha tresholds...\n")
+  Caldata <- NoiseInjecter(RefData = RefData,
+                           ClassLabels = Prior,
+                           refMod = refMod, ...)
+
+  rownames(Caldata$data) <- FixLab(xstring = rownames(Caldata$data))
+  #Fix this step when cross-species is the case
+  HieMetObj <- CTTraverser(Query = Caldata$data, refMod = refMod)
+  df <- ScoreEvaluate(ProbCert = HieMetObj@QueCers,
+                      tree = refMod@tree[[1]],
+                      full.tbl = TRUE)
+  #dfs <- data.frame(Prior=Caldata$Y, df)
+  alpha.list <- list()
+  labs_l <- c(refMod@tree[[1]]$tip.label, refMod@tree[[1]]$node.label)
+  for(class in labs_l[!labs_l %in% "TaxaRoot"]){
+    if(!class %in% refMod@tree[[1]]$tip.label){
+      Node <- match(class, labs_l)
+      leaf <- GetChildNodeLeafs(tree = refMod@tree[[1]], node = Node)
+      leaf <- unlist(leaf[which(lapply(leaf, length)>0)])
+    }else{
+      leaf <- class
+    }
+    alpha.list[[class]] <- colQuarts(df[which(Caldata$Y %in% leaf), ])
+  }
+  # pdf("CertScores_test.pdf",width = 12, height = 6)
+  # for (class in unique(Prior)){
+  #   df.sub <- as.data.frame(dfs)%>% filter(Prior==class) %>% select(-Prior)
+  #   alpha.list[[class]] <- colQuarts(df.sub)
+  #
+  #   p <- as.data.frame(dfs)%>% filter(Prior==class) %>% select(-Prior) %>%
+  #     reshape2::melt() %>% ggplot(aes(variable, value))+geom_boxplot()+
+  #     theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  #     ggtitle(class)+
+  #     geom_hline(yintercept=0.05, linetype="dashed", color = "red")
+  #   print(p)
+  #
+  # }
+  # dev.off()
+
+  return(alpha.list)
 }
 
 #' A function to determine alpha thresholds of each class in the tree.
@@ -517,7 +574,7 @@ GetSigMods <- function(RefData, ClassLabels, refMod, ...){
 #' @param ClassLabels input class labels.
 #' @param NoiseRate the rate at which selected features are noised by setting their values to zero.
 #' @param refMod reference model to inject noise to only selected features. If Null, the entire data is used to inject noise.
-NoiseInjecter <- function(RefData, ClassLabels, NoiseRate=0.5, refMod=NULL, ...){
+NoiseInjecter <- function(RefData, ClassLabels, NoiseRate=0.75, refMod=NULL, ...){
   NoisedRefData <- list()
 
   features <- NULL
@@ -529,7 +586,7 @@ NoiseInjecter <- function(RefData, ClassLabels, NoiseRate=0.5, refMod=NULL, ...)
   features <- unique(features)
   RefData <- RefData[features, ]
 
-  #by default, rate is 10%
+  #by default, rate is 75%
   #Indices of non-zero counts:
   NonZeroInds <- which(RefData!=0, arr.ind = T)
   #Total number of non-zeros

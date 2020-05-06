@@ -11,7 +11,8 @@ HieRFIT <- setClass(Class = "HieRFIT",
                     slots = c(Prior = "character",
                               ClassProbs = "data.frame",
                               ClassWeights = "data.frame",
-                              CertaintyValues = "data.frame",
+                              ClassCertainties = "data.frame",
+                              PathScores = "data.frame",
                               Evaluation = "data.frame",
                               tree = "list"))
 
@@ -34,7 +35,7 @@ HieMetrics <- setClass(Class = "HieMetrics",
 #' @export
 #' @usage refmod <- readRDS("data/exp_refObj.RDS")
 #' @usage hierObj <- HieRFIT(Query = pbmc[["RNA"]]@data, refMod = refmod)
-HieRFIT <- function(Query, refMod, Prior=NULL, Qspecies=NULL, ortoDict=NULL, binarize=FALSE, ...){
+HieRFIT <- function(Query, refMod, Prior=NULL, Qspecies=NULL, ortoDict=NULL, binarize=FALSE, alpha=NULL, ...){
   options(warn=-1)
   if ( class(Query) == "Seurat" ){
     Query_d <- as.matrix(Query[["RNA"]]@data)
@@ -72,7 +73,8 @@ HieRFIT <- function(Query, refMod, Prior=NULL, Qspecies=NULL, ortoDict=NULL, bin
   HieMetObj <- CTTraverser(Query = Query_d, refMod = refMod, ...)
 
   #Evaluate scores and run uncertainty function, then, project the class labels.
-  ScoreEvals <- ScoreEvaluate(ProbCert = HieMetObj@QueCers, tree=refMod@tree[[1]], alphaList = refMod@alphas, ...)
+  if(is.null(alpha)){alpha <- refMod@alphas}
+  ScoreEvals <- ScoreEvaluate(ProbCert = HieMetObj@QueCers, tree=refMod@tree[[1]], alphaList = alpha, ...)
   if ( class(Query) == "Seurat" ){
     Query@meta.data <- cbind(Query@meta.data[, which(!colnames(Query@meta.data) %in% colnames(ScoreEvals))], ScoreEvals)
     object <- Query
@@ -81,11 +83,12 @@ HieRFIT <- function(Query, refMod, Prior=NULL, Qspecies=NULL, ortoDict=NULL, bin
                   Prior = as.character(Prior),
                   ClassProbs = HieMetObj@Pvotes,
                   ClassWeights = HieMetObj@QueWs,
-                  CertaintyValues = HieMetObj@QueCers,
-                  Evaluation = ScoreEvals,
+                  ClassCertainties = HieMetObj@QueCers,
+                  PathScores = ScoreEvals$ScoresArray,
+                  Evaluation = ScoreEvals$Evals,
                   tree = refMod@tree)
   }
-  cat("Successfull!\n")
+  cat("Completed!\n")
   return(object)
 }
 
@@ -94,7 +97,8 @@ HieRFIT <- function(Query, refMod, Prior=NULL, Qspecies=NULL, ortoDict=NULL, bin
 #' @param refMod model from HieRandForest function.
 #' @param thread number of workers to be used for parallel processing. Default is Null, so serial processing.
 CTTraverser <- function(Query, refMod, thread=NULL, ...){
-  cat("Gathering the scores...\n")
+  cat("Traversing the tree...\n")
+  cat("--- Gathering the scores...\n")
   node.list <- DigestTree(tree = refMod@tree[[1]])
   #Create a table for storing node probabilities.
   Pvotes <- data.frame(row.names = colnames(Query))
@@ -310,7 +314,7 @@ GetCls <- function(vec, alphaList, class, ...){
 #' @param full.tbl if true, only the entire score table is returned.
 #' @param alphaList list of alpha threshold of each class.
 ScoreEvaluate <- function(ProbCert, tree, full.tbl=FALSE, alphaList=NULL, ...){
-  cat("Evaluating the scores...\n")
+  cat("--- Evaluating the scores...\n")
   labs_l <- c(tree$tip.label, tree$node.label)#The order is important! tips first. Don't change!#New
   labs_l <- labs_l[!labs_l %in% "TaxaRoot"]
 
@@ -350,7 +354,7 @@ ScoreEvaluate <- function(ProbCert, tree, full.tbl=FALSE, alphaList=NULL, ...){
 
     }else{
       cpaths_sum <- data.frame( ProbCert[, AncPath])
-      cpaths_out <- data.frame(rep(0, length(ProbCert[,1])), row.names = rownames(ProbCert))#NEW#double check the commentout
+      cpaths_out <- data.frame(rep(0, length(ProbCert[,1])), row.names = rownames(ProbCert))
     }
     colnames(cpaths_sum) <- cl
     colnames(cpaths_out) <- cl
@@ -367,14 +371,75 @@ ScoreEvaluate <- function(ProbCert, tree, full.tbl=FALSE, alphaList=NULL, ...){
     return(CertScore)
   }else{
     if(!is.null(alphaList)){
-      cl.CertScore.cmax <- apply(CertScore, 1, GetCls, alphaList=alphaList, class=TRUE)
-      CertScoremax <- apply(CertScore, 1, GetCls, alphaList=alphaList, class=FALSE)
+      cat("--- Computing the path scores...\n")
+      cl.CertScore.cmax <- apply(CertScore, 1, GetCls5, alphaList=alphaList, tree=tree, class=TRUE)
+      CertScoremax <- apply(CertScore, 1, GetCls5, alphaList=alphaList, tree=tree, class=FALSE)
     }else{
       cl.CertScore.cmax <- colnames(CertScore)[apply(CertScore, 1, which.max)]
       CertScoremax <- apply(CertScore, 1, function(x) max(x))
     }
     df <- data.frame(Score = CertScoremax,
                      Projection = cl.CertScore.cmax)
-    return(df)
+
+    return(list(Evals = df, ScoresArray=CertScore))
   }
 }
+
+
+GetCls5 <- function(vec, alphaList, class, tree, ...){
+  #internalNodes <- names(vec)[!names(vec) %in% names(alphaList)]
+  #log.list <- rep( TRUE, length(internalNodes))
+  #names(log.list) <- internalNodes
+  log.list <- vector()
+  #names(log.list) <- "TaxaRoot"
+  for(c in names(alphaList)){
+    #cat(paste("Class:", c, "\n"))
+    #print(vec[GetAncestPath(tree, class = c, labels = T)] > alphaList[[c]]["25%", GetAncestPath(tree, class = c, labels = T)])
+    #print(vec[GetAncestPath(tree, class = c, labels = T)] < alphaList[[c]]["100%", GetAncestPath(tree, class = c, labels = T)])
+
+    # pathTF <- c(vec[GetAncestPath(tree, class = c, labels = T)] > alphaList[[c]]["25%", GetAncestPath(tree, class = c, labels = T)],
+    #             vec[GetAncestPath(tree, class = c, labels = T)] < alphaList[[c]]["100%", GetAncestPath(tree, class = c, labels = T)])
+    # pathTF.pct <- 100*table(pathTF)/length(pathTF)
+    #
+
+#    x1=as.numeric(vec[GetAncestPath(tree, class = c, labels = T)])
+#    x2=as.numeric(alphaList[[c]]["50%", GetAncestPath(tree, class = c, labels = T)])
+    x1=as.numeric(vec)
+    x2=as.numeric(alphaList[[c]]["50%", ])
+    ed <- dist(rbind(x1,x2))
+
+    #print(pathTF.pct)
+    #cat(paste("Score of ", c, "is: ", vec[c], "\n"))
+    #  logic.c <- all(c(vec[GetAncestPath(tree, class = c, labels = T)] > alphaList[[c]]["0%", GetAncestPath(tree, class = c, labels = T)],
+    #                   vec[GetAncestPath(tree, class = c, labels = T)] < alphaList[[c]]["100%", GetAncestPath(tree, class = c, labels = T)]))
+    #logic.c <- all(c(vec[GetAncestPath(tree, class = c, labels = T)] > alphaList[[c]]["25%", GetAncestPath(tree, class = c, labels = T)],
+    #                 vec[GetAncestPath(tree, class = c, labels = T)] < alphaList[[c]]["100%", GetAncestPath(tree, class = c, labels = T)]))
+    #logic.c <- pathTF.pct['TRUE'] >= 75.00
+    logic.c <- ed/length(x1) < 1.00
+
+    names(logic.c) <- c
+    log.list <- c(log.list, logic.c)
+  }
+  #print(log.list)
+  if(any(log.list)){
+    #print(vec[names(which(log.list))])
+    cls.val <- max(vec[names(which(log.list))])
+    cls.out <- names(which.max(vec[names(which(log.list))]))
+  }else{
+    cls.val <- max(vec)
+    cls.out <- "Undetermined"
+  }
+
+  #print(cls.val)
+
+  if(class){
+    if(cls.val > 0.05){
+      out <- cls.out
+    }else{out <- "Undetermined"}
+  }else{
+    out <- cls.val
+  }
+
+  return(out)
+}
+
