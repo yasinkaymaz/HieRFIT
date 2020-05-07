@@ -23,7 +23,8 @@ HieRFIT <- setClass(Class = "HieRFIT",
 HieMetrics <- setClass(Class = "HieMetrics",
                        slots = c(Pvotes = "data.frame",
                                  QueWs = "data.frame",
-                                 QueCers = "data.frame"))
+                                 QueCers = "data.frame",
+                                 PathProbScores = "data.frame"))
 
 #' The main function to project reference data on query in order to identify class labels.
 #' @param Query Query data whose components will be labeled with reference data.
@@ -74,7 +75,7 @@ HieRFIT <- function(Query, refMod, Prior=NULL, Qspecies=NULL, ortoDict=NULL, bin
 
   #Evaluate scores and run uncertainty function, then, project the class labels.
   if(is.null(alpha)){alpha <- refMod@alphas}
-  ScoreEvals <- ScoreEvaluate(ProbCert = HieMetObj@QueCers, tree=refMod@tree[[1]], alphaList = alpha, ...)
+  ScoreEvals <- ScoreEvaluate(ProbCert = HieMetObj@QueCers, ProbScores = HieMetObj@PathProbScores, tree=refMod@tree[[1]], alphaList = alpha, ...)
   if ( class(Query) == "Seurat" ){
     Query@meta.data <- cbind(Query@meta.data[, which(!colnames(Query@meta.data) %in% colnames(ScoreEvals))], ScoreEvals)
     object <- Query
@@ -143,11 +144,14 @@ CTTraverser <- function(Query, refMod, thread=NULL, ...){
       QueCers <- cbind(QueCers, nodeQueCers)
 
     } #closes the for loop.
+    QueScores <- Pvotes/QueWs
+    PathProbScores <- ClassProbCalculator(tree = refMod@tree[[1]], nodes_P_all = QueScores)
 
     HieMetrxObj <- new(Class = "HieMetrics",
                        Pvotes = Pvotes,
                        QueWs = QueWs,
-                       QueCers = QueCers)
+                       QueCers = QueCers,
+                       PathProbScores = PathProbScores)
 
   }else{# FIX THIS PART! thread is specified. For now, use this only when running on bigMem machines.
     library(doParallel)
@@ -291,29 +295,12 @@ ceR <- function(qP, qW){
   return(QueCers)
 }
 
-#' Get the best class
-#' @param vec vector of scores.
-#' @param alphaList list of alpha threshold of each class.
-#' @param class whether the output is class or its score.
-GetCls <- function(vec, alphaList, class, ...){
-  #alphaList <- t(as.data.frame(alphaList))
-  #cert.vec <- vec > alphaList[, "Low.ext"]
-  cert.vec <- vec > alphaList
-  candits <- names(cert.vec)[cert.vec]
-  if(identical(candits, character(0)) ){
-    if(class){cls.out <- "Undetermined"}else{cls.out <- 0}
-  }else{
-    if(class){cls.out <- names(which.max(vec[candits]))}else{cls.out <- max(vec[candits])}
-  }
-  return(cls.out)
-}
-
 #' A function for evalating the uncertainty.
 #' @param ProbCert Certainty scores.
 #' @param tree a tree topology with which hrf model was trained on. 'phylo' format.
 #' @param full.tbl if true, only the entire score table is returned.
 #' @param alphaList list of alpha threshold of each class.
-ScoreEvaluate <- function(ProbCert, tree, full.tbl=FALSE, alphaList=NULL, ...){
+ScoreEvaluate <- function(ProbCert, ProbScores, tree, full.tbl=FALSE, alphaList=NULL, ...){
   cat("--- Evaluating the scores...\n")
   labs_l <- c(tree$tip.label, tree$node.label)#The order is important! tips first. Don't change!#New
   labs_l <- labs_l[!labs_l %in% "TaxaRoot"]
@@ -372,8 +359,10 @@ ScoreEvaluate <- function(ProbCert, tree, full.tbl=FALSE, alphaList=NULL, ...){
   }else{
     if(!is.null(alphaList)){
       cat("--- Computing the path scores...\n")
-      cl.CertScore.cmax <- apply(CertScore, 1, GetCls5, alphaList=alphaList, tree=tree, class=TRUE)
-      CertScoremax <- apply(CertScore, 1, GetCls5, alphaList=alphaList, tree=tree, class=FALSE)
+      #cl.CertScore.cmax <- apply(CertScore, 1, GetCls5, alphaList=alphaList, tree=tree, class=TRUE)
+      #CertScoremax <- apply(CertScore, 1, GetCls5, alphaList=alphaList, tree=tree, class=FALSE)
+      cl.CertScore.cmax <- sapply(seq_len(nrow(CertScore)), GetCls_beta, Upath=CertScore, Ppath=ProbScores, alphaList=alphaList, tree=tree, class=TRUE)
+      CertScoremax <- sapply(seq_len(nrow(CertScore)), GetCls_beta, Upath=CertScore, Ppath=ProbScores, alphaList=alphaList, tree=tree, class=FALSE)
     }else{
       cl.CertScore.cmax <- colnames(CertScore)[apply(CertScore, 1, which.max)]
       CertScoremax <- apply(CertScore, 1, function(x) max(x))
@@ -386,60 +375,57 @@ ScoreEvaluate <- function(ProbCert, tree, full.tbl=FALSE, alphaList=NULL, ...){
 }
 
 
-GetCls5 <- function(vec, alphaList, class, tree, ...){
-  #internalNodes <- names(vec)[!names(vec) %in% names(alphaList)]
-  #log.list <- rep( TRUE, length(internalNodes))
-  #names(log.list) <- internalNodes
+GetCls_beta <- function(i, Upath, Ppath, alphaList, tree, class, ...){
+  #Select the candidates:
   log.list <- vector()
-  #names(log.list) <- "TaxaRoot"
   for(c in names(alphaList)){
-    #cat(paste("Class:", c, "\n"))
-    #print(vec[GetAncestPath(tree, class = c, labels = T)] > alphaList[[c]]["25%", GetAncestPath(tree, class = c, labels = T)])
-    #print(vec[GetAncestPath(tree, class = c, labels = T)] < alphaList[[c]]["100%", GetAncestPath(tree, class = c, labels = T)])
-
-    # pathTF <- c(vec[GetAncestPath(tree, class = c, labels = T)] > alphaList[[c]]["25%", GetAncestPath(tree, class = c, labels = T)],
-    #             vec[GetAncestPath(tree, class = c, labels = T)] < alphaList[[c]]["100%", GetAncestPath(tree, class = c, labels = T)])
-    # pathTF.pct <- 100*table(pathTF)/length(pathTF)
-    #
-
-#    x1=as.numeric(vec[GetAncestPath(tree, class = c, labels = T)])
-#    x2=as.numeric(alphaList[[c]]["50%", GetAncestPath(tree, class = c, labels = T)])
-    x1=as.numeric(vec)
-    x2=as.numeric(alphaList[[c]]["50%", ])
+    x1=as.numeric(Upath[i,])
+    x2=as.numeric(alphaList[[c]]["50%",])
     ed <- dist(rbind(x1,x2))
-
-    #print(pathTF.pct)
-    #cat(paste("Score of ", c, "is: ", vec[c], "\n"))
-    #  logic.c <- all(c(vec[GetAncestPath(tree, class = c, labels = T)] > alphaList[[c]]["0%", GetAncestPath(tree, class = c, labels = T)],
-    #                   vec[GetAncestPath(tree, class = c, labels = T)] < alphaList[[c]]["100%", GetAncestPath(tree, class = c, labels = T)]))
-    #logic.c <- all(c(vec[GetAncestPath(tree, class = c, labels = T)] > alphaList[[c]]["25%", GetAncestPath(tree, class = c, labels = T)],
-    #                 vec[GetAncestPath(tree, class = c, labels = T)] < alphaList[[c]]["100%", GetAncestPath(tree, class = c, labels = T)]))
-    #logic.c <- pathTF.pct['TRUE'] >= 75.00
     logic.c <- ed/length(x1) < 1.00
-
     names(logic.c) <- c
     log.list <- c(log.list, logic.c)
   }
-  #print(log.list)
-  if(any(log.list)){
-    #print(vec[names(which(log.list))])
-    cls.val <- max(vec[names(which(log.list))])
-    cls.out <- names(which.max(vec[names(which(log.list))]))
-  }else{
-    cls.val <- max(vec)
-    cls.out <- "Undetermined"
-  }
 
-  #print(cls.val)
+  if(any(log.list)){
+    candits <- names(which(log.list))
+    #Pick the best class among the candidates
+    if(length(candits) == 1){
+      classL <- candits
+      }else{
+        classL <- colnames(Ppath[i, candits])[apply(Ppath[i, candits], 1, which.max)]
+      }
+    classS <- Ppath[i, classL]
+  }else{
+    classL <- "Undetermined"
+    classS <- max(Ppath[i,])
+  }
 
   if(class){
-    if(cls.val > 0.05){
-      out <- cls.out
-    }else{out <- "Undetermined"}
+    return(classL)
   }else{
-    out <- cls.val
+    return(classS)
   }
+}
 
-  return(out)
+#' A function to calculate class scores for all internal and tip node classes.
+#' @param tree
+#' @param nodes_P_all a table output from CTTraverser() which contains all class probabilities from every node.
+#' @return P_path_prod a table for products of ancestor node scores.
+ClassProbCalculator <- function(tree, nodes_P_all){
+  P_path_prod <- data.frame(row.names = rownames(nodes_P_all))
+  clabs <- c(tree$tip.label, tree$node.label)[tree$edge[, 2]]
+  for(cl in clabs){
+    map <- GetAncestPath(tree = tree, class = cl,labels = T)
+
+    if(length(map) > 1){
+      nt_prob <- data.frame(apply(nodes_P_all[, map], 1, prod))
+    }else{
+      nt_prob <- data.frame(nodes_P_all[, map])
+    }
+    colnames(nt_prob) <- cl
+    P_path_prod <- cbind(P_path_prod, nt_prob)
+  }
+  return(P_path_prod)
 }
 
