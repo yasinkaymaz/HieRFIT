@@ -359,10 +359,10 @@ ScoreEvaluate <- function(ProbCert, ProbScores, tree, full.tbl=FALSE, alphaList=
   }else{
     if(!is.null(alphaList)){
       cat("--- Computing the path scores...\n")
-      #cl.CertScore.cmax <- apply(CertScore, 1, GetCls5, alphaList=alphaList, tree=tree, class=TRUE)
-      #CertScoremax <- apply(CertScore, 1, GetCls5, alphaList=alphaList, tree=tree, class=FALSE)
-      cl.CertScore.cmax <- sapply(seq_len(nrow(CertScore)), GetCls_beta, Upath=CertScore, Ppath=ProbScores, alphaList=alphaList, tree=tree, class=TRUE)
-      CertScoremax <- sapply(seq_len(nrow(CertScore)), GetCls_beta, Upath=CertScore, Ppath=ProbScores, alphaList=alphaList, tree=tree, class=FALSE)
+      cl.CertScore.cmax <- sapply(seq_len(nrow(CertScore)), GetCls_alpha, Upath=CertScore, alphaList=alphaList, tree=tree, class=TRUE)
+      CertScoremax <- sapply(seq_len(nrow(CertScore)), GetCls_alpha, Upath=CertScore, alphaList=alphaList, tree=tree, class=FALSE)
+      #cl.CertScore.cmax <- sapply(seq_len(nrow(CertScore)), GetCls_beta, Upath=CertScore, Ppath=ProbScores, alphaList=alphaList, tree=tree, class=TRUE)
+      #CertScoremax <- sapply(seq_len(nrow(CertScore)), GetCls_beta, Upath=CertScore, Ppath=ProbScores, alphaList=alphaList, tree=tree, class=FALSE)
     }else{
       cl.CertScore.cmax <- colnames(CertScore)[apply(CertScore, 1, which.max)]
       CertScoremax <- apply(CertScore, 1, function(x) max(x))
@@ -407,6 +407,41 @@ GetCls_beta <- function(i, Upath, Ppath, alphaList, tree, class, ...){
     return(classS)
   }
 }
+
+GetCls_alpha <- function(i, Upath, alphaList, tree, class, ...){
+  #Select the candidates:
+  log.list <- vector()
+  for(c in names(alphaList)){
+    x1=as.numeric(Upath[i,])
+    x2=as.numeric(alphaList[[c]]["50%",])
+    ed <- dist(rbind(x1,x2))
+    logic.c <- ed/length(x1) < 1.00
+    names(logic.c) <- c
+    log.list <- c(log.list, logic.c)
+  }
+
+  if(any(log.list)){
+    candits <- names(which(log.list))
+    #Pick the best class among the candidates
+    if(length(candits) == 1){
+      classL <- candits
+    }else{
+      classL <- colnames(Upath[i, candits])[apply(Upath[i, candits], 1, which.max)]
+    }
+    classS <- Upath[i, classL]
+  }else{
+    classL <- "Undetermined"
+    classS <- max(Upath[i,])
+  }
+
+  if(class){
+    return(classL)
+  }else{
+    return(classS)
+  }
+}
+
+
 
 #' A function to calculate class scores for all internal and tip node classes.
 #' @param tree
