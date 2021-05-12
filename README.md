@@ -118,6 +118,12 @@ new.pbmc.data <- Read10X("pbmc_10k_v3/filtered_feature_bc_matrix/")
 newPBMC <- CreateSeuratObject(counts = new.pbmc.data, project = "pbmc10k", min.cells = 3, min.features = 200)
 
 newPBMC <- NormalizeData(newPBMC)
+
+newPBMC <- FindVariableFeatures(newPBMC, selection.method = "vst", nfeatures = 2000)
+newPBMC <- ScaleData(newPBMC)
+newPBMC <- RunPCA(newPBMC)
+newPBMC <- FindNeighbors(newPBMC, dims = 1:10)
+newPBMC <- FindClusters(newPBMC, resolution = 0.5)
 ```
 
 In case you are loading a previously saved model, please use the 'readRDS' function to load it. To project the reference cell types, simply, feed the _HieRFIT_ function with the reference model 'refmod' and the query's normalized expression data:
