@@ -14,6 +14,8 @@ install.packages("devtools")
 devtools::install_github("yasinkaymaz/HieRFIT")
 
 library(HieRFIT)
+
+Note: Installing additional R packages are recommended: DiagrammeR, e1071, alluvial, and ggalluvial
 ```
 
 ### Quick tutorial
