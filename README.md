@@ -123,7 +123,7 @@ newPBMC <- FindVariableFeatures(newPBMC, selection.method = "vst", nfeatures = 2
 newPBMC <- ScaleData(newPBMC)
 newPBMC <- RunPCA(newPBMC)
 newPBMC <- FindNeighbors(newPBMC, dims = 1:10)
-newPBMC <- FindClusters(newPBMC, resolution = 0.5)
+newPBMC <- FindClusters(newPBMC, resolution = 1)
 ```
 
 In case you are loading a previously saved model, please use the 'readRDS' function to load it. To project the reference cell types, simply, feed the _HieRFIT_ function with the reference model 'refmod' and the query's normalized expression data:
