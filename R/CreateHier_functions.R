@@ -382,6 +382,7 @@ NodeTrainer <- function(Rdata, tree, node, f_n=200, tree_n=500, min_n = 500, ...
                                        allowParallel = TRUE,
                                        classProbs =  TRUE,
                                        trim = TRUE)
+
   node.mod <- caret::train(x = node.Data,
                            y = node.ClassLabels,
                            method = "rf",

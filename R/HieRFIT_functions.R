@@ -359,8 +359,10 @@ ScoreEvaluate <- function(ProbCert, ProbScores, tree, full.tbl=FALSE, alphaList=
   }else{
     if(!is.null(alphaList)){
       cat("--- Computing the path scores...\n")
-      cl.CertScore.cmax <- sapply(seq_len(nrow(CertScore)), GetCls_alpha, Upath=CertScore, alphaList=alphaList, tree=tree, class=TRUE)
-      CertScoremax <- sapply(seq_len(nrow(CertScore)), GetCls_alpha, Upath=CertScore, alphaList=alphaList, tree=tree, class=FALSE)
+      cl.CertScore.cmax <- sapply(seq_len(nrow(CertScore)), GetCls_patha, Upath=CertScore, alphaList=alphaList, tree=tree, class=TRUE)
+      CertScoremax <- sapply(seq_len(nrow(CertScore)), GetCls_patha, Upath=CertScore, alphaList=alphaList, tree=tree, class=FALSE)
+      #cl.CertScore.cmax <- sapply(seq_len(nrow(CertScore)), GetCls_alpha, Upath=CertScore, alphaList=alphaList, tree=tree, class=TRUE)
+      #CertScoremax <- sapply(seq_len(nrow(CertScore)), GetCls_alpha, Upath=CertScore, alphaList=alphaList, tree=tree, class=FALSE)
       #cl.CertScore.cmax <- sapply(seq_len(nrow(CertScore)), GetCls_beta, Upath=CertScore, Ppath=ProbScores, alphaList=alphaList, tree=tree, class=TRUE)
       #CertScoremax <- sapply(seq_len(nrow(CertScore)), GetCls_beta, Upath=CertScore, Ppath=ProbScores, alphaList=alphaList, tree=tree, class=FALSE)
     }else{
@@ -369,11 +371,52 @@ ScoreEvaluate <- function(ProbCert, ProbScores, tree, full.tbl=FALSE, alphaList=
     }
     df <- data.frame(Score = CertScoremax,
                      Projection = cl.CertScore.cmax)
+    rownames(df) <- rownames(CertScore)
 
     return(list(Evals = df, ScoresArray=CertScore))
   }
 }
 
+
+
+GetCls_patha <- function(i, Upath, alphaList, tree, class, ...){
+
+  labs_l <- c(tree$tip.label, tree$node.label)#The order is important! tips first. Don't change!#New
+  labs_l <- labs_l[!labs_l %in% "TaxaRoot"]
+  #Select the candidates:
+  clist <- NULL
+  for(c in labs_l){
+    #freq <- as.data.frame(t(colSums(Upath[i, ])))#!
+    freq <- as.data.frame(Upath[i, ])#!
+    freq[freq <0] <- 0
+    names(freq) <- FixLab(xstring = names(freq))
+    freq <- round(freq*100/sum(freq), digits = 1)
+    c.logic <- (freq[GetSiblings(tree = tree, class = c)] + 0.5) < as.numeric(freq[c])
+    c.logic <- all(c.logic)
+    names(c.logic) <- c
+    clist <- c(clist, c.logic)
+  }
+
+  if(any(clist)){
+    candits <- names(which(clist))
+    #Pick the best class among the candidates
+    if(length(candits) == 1){
+      classL <- candits
+    }else{
+      classL <- colnames(Upath[i, candits])[apply(Upath[i, candits], 1, which.max)]
+    }
+    classS <- Upath[i, classL]
+  }else{
+    classL <- "Undetermined"
+    classS <- max(Upath[i,])
+  }
+
+  if(class){
+    return(classL)
+  }else{
+    return(classS)
+  }
+}
 
 GetCls_beta <- function(i, Upath, Ppath, alphaList, tree, class, ...){
   #Select the candidates:
