@@ -1,5 +1,7 @@
 # HieRFIT
-## Hierarchical Random Forest for Information Transfer
+## HieRFIT: A hierarchical cell type classification tool for projections from complex single-cell atlas datasets
+
+HieRFIT stands for Hierarchical Random Forest for Information Transfer
 
 ![](data/extra/HieRFIT_banner.jpg)
 
